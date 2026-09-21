@@ -772,7 +772,8 @@ def _draw_mode2_dashboard(
     if epochs is not None:
         lbl_part = f"• Implied Epochs:   {epochs:.2f} epochs"
         calc_part = f"  [(iters: {cfg.iters:,} × batch: {cfg.batch_size}) / {train_count:,} train records]"
-        safe_addstr(stdscr, vis_y + 1, 2, lbl_part[:max_x - 4], white_unbold)
+        epoch_attr = (get_color(COLOR_ERROR) if curses.has_colors() else 0) if epochs < 1.0 else white_unbold
+        safe_addstr(stdscr, vis_y + 1, 2, lbl_part[:max_x - 4], epoch_attr)
         if len(lbl_part) + 2 < max_x - 4:
             safe_addstr(stdscr, vis_y + 1, 2 + len(lbl_part), calc_part[:max_x - 4 - len(lbl_part)], gray_unbold)
     else:

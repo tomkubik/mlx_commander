@@ -417,6 +417,44 @@ class TestLoraUI(unittest.TestCase):
         all_text = " ".join(c[0][2] for c in calls if len(c[0]) >= 3 and isinstance(c[0][2], str))
         self.assertNotIn("Workflow Shortcuts", all_text)
 
+    @patch("mlx_commander.tui.widgets.curses.color_pair", side_effect=lambda n: n * 256)
+    @patch("mlx_commander.tui.app.curses.color_pair", side_effect=lambda n: n * 256)
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_implied_epochs_color_under_one_epoch(self, mock_curs, mock_colors, mock_has_colors, mock_app_cp, mock_wid_cp):
+        """Verify that when implied epochs < 1.0, it is marked in COLOR_ERROR (dark red font)."""
+        from mlx_commander.tui.widgets import COLOR_ERROR, COLOR_NORMAL_TEXT
+
+        state = CommanderState()
+        state.active_tab = 1
+        state.loaded_dataset = True
+        state.get_split_counts = lambda: {"train": 1000}
+        # iters: 100 * batch: 4 = 400 records -> 0.40 epochs (< 1.0)
+        state.lora_config.iters = 100
+        state.lora_config.batch_size = 4
+
+        self.mock_win.reset_mock()
+        self.mock_win.getmaxyx.return_value = (35, 120)
+        self.mock_win.getch.side_effect = [ord("q")]
+
+        run_commander_tui(self.mock_win, initial_state=state)
+
+        calls = self.mock_win.addstr.call_args_list
+        found_red_epoch = False
+        for c in calls:
+            args = c[0]
+            if len(args) >= 3 and isinstance(args[2], str):
+                text = args[2]
+                attr = args[3] if len(args) >= 4 else 0
+                if "• Implied Epochs:" in text:
+                    self.assertIn("0.40 epochs", text)
+                    pair_num = (attr & ~curses.A_DIM & ~curses.A_BOLD) // 256
+                    self.assertEqual(pair_num, COLOR_ERROR, "Implied epochs < 1.0 should be styled with COLOR_ERROR (dark red font)")
+                    found_red_epoch = True
+
+        self.assertTrue(found_red_epoch, "Implied Epochs line (< 1.0) should be rendered in COLOR_ERROR")
+
 
 if __name__ == "__main__":
     unittest.main()
