@@ -95,6 +95,8 @@ class CommanderState:
 
     # Screen / Mode Navigation
     active_tab: int = 0  # 0: Dataset Conversion, 1: Fine-Tuning Single Run
+    mode_switcher_focused: bool = False
+    mode_switcher_idx: int = 0
 
     # LoRA Fine-Tuning State
     lora_config: LoraRunConfig = field(default_factory=LoraRunConfig)
@@ -247,6 +249,17 @@ class CommanderState:
             self.lora_config.data = str(self.output_dir)
         elif self.dataset_path:
             self.lora_config.data = str(self.dataset_path)
+
+    def switch_mode(self, target_tab: int) -> None:
+        """Switch active mode tab and synchronize dependent state."""
+        if target_tab != self.active_tab:
+            self.active_tab = target_tab
+            if self.active_tab == 1:
+                self.sync_dataset_to_lora()
+                self.status_message = "Switched to Fine-Tuning Single Run Mode."
+            else:
+                self.status_message = "Switched to Dataset Conversion Mode."
+            self.status_is_error = False
 
     def add_current_lora_to_queue(self) -> LoraRunConfig:
         """Add current form config as a new run in the queue."""

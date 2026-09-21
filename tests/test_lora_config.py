@@ -26,6 +26,7 @@ class TestLoraConfig(unittest.TestCase):
         self.assertTrue(cfg.train)
         self.assertFalse(cfg.test)
         self.assertEqual(cfg.status, "queued")
+        self.assertEqual(cfg.steps_per_eval, 100)
 
     def test_popular_models_and_constants(self):
         self.assertGreater(len(POPULAR_MLX_MODELS), 5)
@@ -80,6 +81,7 @@ class TestLoraConfig(unittest.TestCase):
         self.assertIn("--adapter-path adapters/llama_1b", cmd)
         self.assertIn("--grad-checkpoint", cmd)
         self.assertIn("--mask-prompt", cmd)
+        self.assertIn("--steps-per-eval 100", cmd)
 
     def test_dict_serialization_round_trip(self):
         cfg1 = LoraRunConfig(

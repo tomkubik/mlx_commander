@@ -302,8 +302,8 @@ def _draw_mode1_dashboard(
     preview_y = vis_y + vis_h
     preview_h = max(4, max_y - 1 - preview_y)
 
-    is_left = (state.active_panel == ActivePanel.LEFT)
-    is_right = (state.active_panel == ActivePanel.RIGHT)
+    is_left = (state.active_panel == ActivePanel.LEFT and not state.mode_switcher_focused)
+    is_right = (state.active_panel == ActivePanel.RIGHT and not state.mode_switcher_focused)
 
     # 1. Left Panel: Dataset Source & Schema
     draw_box_panel(
@@ -591,9 +591,9 @@ def _draw_mode2_dashboard(
     queue_y = vis_y + vis_h
     queue_h = max(3, max_y - 1 - queue_y)
 
-    is_lora_left = (state.lora_active_panel == "left")
-    is_lora_right = (state.lora_active_panel == "right")
-    is_lora_queue = (state.lora_active_panel == "queue")
+    is_lora_left = (state.lora_active_panel == "left" and not state.mode_switcher_focused)
+    is_lora_right = (state.lora_active_panel == "right" and not state.mode_switcher_focused)
+    is_lora_queue = (state.lora_active_panel == "queue" and not state.mode_switcher_focused)
 
     # 1. Left Panel: Model & Dataset Selector (All input fields right-aligned to left_right_edge)
     left_right_edge = left_w - 3
@@ -665,48 +665,9 @@ def _draw_mode2_dashboard(
     right_edge = max_x - 3
     cfg = state.lora_config
 
-    # Read base model metadata (cached in state)
-    meta = state.inspect_current_model()
-
-    # Base Model Name and Architecture Hyperparameters (Non-input fields, non-bold white font)
     white_unbold = get_color(COLOR_NORMAL_TEXT) if curses.has_colors() else 0
-
-    if panel_h >= 19:
-        # 2 lines of model architecture specs + 1 divider
-        if meta and meta.is_valid:
-            sz_str = f" ({meta.file_size_gb:.1f} GB)" if meta.file_size_gb > 0 else ""
-            m_line = f"• Model:  {meta.name}{sz_str}"
-            p_line = f"• Params: {meta.format_hyperparameters_line()}"
-        else:
-            m_line = f"• Model:  {cfg.model or '(No model selected on drive)'}"
-            p_line = "• Params: (Select a local model on drive to inspect architecture)"
-
-        safe_addstr(stdscr, 2, left_w + 2, m_line[:right_w - 4], white_unbold)
-        safe_addstr(stdscr, 3, left_w + 2, p_line[:right_w - 4], white_unbold)
-
-        # Subtle divider
-        div_text = " LoRA Fine-Tuning Hyperparameters "
-        pad_len = max(2, (right_w - 4 - len(div_text)) // 2)
-        div_line = "─" * pad_len + div_text + "─" * pad_len
-        safe_addstr(stdscr, 4, left_w + 2, div_line[:right_w - 4], (get_color(COLOR_BORDER_JOINTS) | curses.A_DIM) if curses.has_colors() else curses.A_DIM)
-
-        field_start_y = 5
-        inner_h = max(1, panel_h - 5)
-    else:
-        # Compact 1-line model architecture info + 1 divider
-        if meta and meta.is_valid:
-            m_line = f"• Model: {meta.name} │ {meta.format_hyperparameters_line()}"
-        else:
-            m_line = f"• Model: {cfg.model or '(No model selected)'}"
-
-        safe_addstr(stdscr, 2, left_w + 2, m_line[:right_w - 4], white_unbold)
-        div_text = " LoRA Parameters "
-        pad_len = max(2, (right_w - 4 - len(div_text)) // 2)
-        div_line = "─" * pad_len + div_text + "─" * pad_len
-        safe_addstr(stdscr, 3, left_w + 2, div_line[:right_w - 4], (get_color(COLOR_BORDER_JOINTS) | curses.A_DIM) if curses.has_colors() else curses.A_DIM)
-
-        field_start_y = 4
-        inner_h = max(1, panel_h - 4)
+    field_start_y = 2
+    inner_h = max(1, panel_h - 2)
 
     fields_def = [
         (0, "Training Iterations", str(cfg.iters), 10, False),
@@ -899,7 +860,17 @@ def _handle_mode1_input(
     # Navigation in Left Panel (Tab 1)
     elif is_left:
         num_cols = len(state.loaded_dataset.columns) if (state.loaded_dataset and state.loaded_dataset.columns) else 0
-        if key in (curses.KEY_UP, curses.KEY_LEFT, ord("k"), ord("h")):
+        if key in (curses.KEY_UP, ord("k")):
+            if state.left_focus_idx == 1 and state.selected_column_idx > 0:
+                state.selected_column_idx -= 1
+            elif state.left_focus_idx == 1:
+                state.left_focus_idx = 0
+            elif state.left_focus_idx == 0:
+                state.mode_switcher_focused = True
+                state.mode_switcher_idx = state.active_tab
+                state.status_message = "Mode Switcher: Use [←/→] to select mode, [Enter] to switch, [↓] to return to pane."
+                state.status_is_error = False
+        elif key in (curses.KEY_LEFT, ord("h")):
             if state.left_focus_idx == 1 and state.selected_column_idx > 0:
                 state.selected_column_idx -= 1
             elif state.left_focus_idx == 1:
@@ -1035,7 +1006,13 @@ def _handle_mode2_input(
     # Navigation in Left Panel (Setup)
     elif state.lora_active_panel == "left":
         if key in (curses.KEY_UP, ord("k")):
-            state.lora_left_focus_idx = max(0, state.lora_left_focus_idx - 1)
+            if state.lora_left_focus_idx == 0:
+                state.mode_switcher_focused = True
+                state.mode_switcher_idx = state.active_tab
+                state.status_message = "Mode Switcher: Use [←/→] to select mode, [Enter] to switch, [↓] to return to pane."
+                state.status_is_error = False
+            else:
+                state.lora_left_focus_idx -= 1
         elif key in (curses.KEY_DOWN, ord("j")):
             state.lora_left_focus_idx = min(5, state.lora_left_focus_idx + 1)
         elif key in (curses.KEY_RIGHT, ord("l")):
@@ -1286,16 +1263,29 @@ def run_commander_tui(
 
         mode1_title = "[ 1: Dataset Converter ]"
         mode2_title = "[ 2: Fine-Tuning Single Run ]"
-        if state.active_tab == 0:
-            m1_attr = hdr_attr | curses.A_STANDOUT | curses.A_BOLD
-            m2_attr = hdr_attr | curses.A_DIM
+        if state.mode_switcher_focused:
+            focused_attr = (get_color(COLOR_INPUT_FOCUSED) | curses.A_BOLD) if curses.has_colors() else (curses.A_STANDOUT | curses.A_BOLD)
+            active_attr = hdr_attr | curses.A_STANDOUT | curses.A_BOLD
+            dim_attr = hdr_attr | curses.A_DIM
+
+            m1_attr = focused_attr if state.mode_switcher_idx == 0 else (active_attr if state.active_tab == 0 else dim_attr)
+            m2_attr = focused_attr if state.mode_switcher_idx == 1 else (active_attr if state.active_tab == 1 else dim_attr)
         else:
-            m1_attr = hdr_attr | curses.A_DIM
-            m2_attr = hdr_attr | curses.A_STANDOUT | curses.A_BOLD
+            if state.active_tab == 0:
+                m1_attr = hdr_attr | curses.A_STANDOUT | curses.A_BOLD
+                m2_attr = hdr_attr | curses.A_DIM
+            else:
+                m1_attr = hdr_attr | curses.A_DIM
+                m2_attr = hdr_attr | curses.A_STANDOUT | curses.A_BOLD
 
         safe_addstr(stdscr, 0, x_m1, mode1_title, m1_attr)
         x_m2 = x_m1 + len(mode1_title) + 2
         safe_addstr(stdscr, 0, x_m2, mode2_title, m2_attr)
+
+        if state.mode_switcher_focused:
+            hint = "Navigate: [←/→]  Confirm: [Enter]  Return: [↓]"
+            if max_x >= x_m2 + len(mode2_title) + len(hint) + 3:
+                safe_addstr(stdscr, 0, max_x - len(hint) - 2, hint, (get_color(COLOR_TITLE_ACCENT) | curses.A_BOLD) if curses.has_colors() else curses.A_BOLD)
 
         # ----------------------------------------------------
         # 2. Dimensions & Coordinates (3-Tier Responsive Layout)
@@ -1412,7 +1402,20 @@ def run_commander_tui(
             stdscr.clear()
             continue
 
-        elif key in (27, ord("q"), ord("Q"), curses.KEY_F10):
+        if key == 27:  # ESC
+            if state.mode_switcher_focused:
+                state.mode_switcher_focused = False
+                state.mode_switcher_idx = state.active_tab
+                if state.active_tab == 0:
+                    state.active_panel = ActivePanel.LEFT
+                    state.left_focus_idx = 0
+                else:
+                    state.lora_active_panel = "left"
+                    state.lora_left_focus_idx = 0
+                continue
+            break
+
+        elif key in (ord("q"), ord("Q"), curses.KEY_F10):
             break
 
         try:
@@ -1420,13 +1423,35 @@ def run_commander_tui(
                 show_help_dialog(stdscr)
 
             elif key in (curses.KEY_F2, 20):  # F2 or Ctrl+T (Mode switcher)
-                state.active_tab = 1 - state.active_tab
-                if state.active_tab == 1:
-                    state.sync_dataset_to_lora()
-                    state.status_message = "Switched to Fine-Tuning Single Run Mode."
-                else:
-                    state.status_message = "Switched to Dataset Conversion Mode."
-                state.status_is_error = False
+                state.mode_switcher_focused = False
+                state.switch_mode(1 - state.active_tab)
+                state.mode_switcher_idx = state.active_tab
+
+            elif state.mode_switcher_focused:
+                if key in (curses.KEY_LEFT, ord("h")):
+                    state.mode_switcher_idx = max(0, state.mode_switcher_idx - 1)
+                elif key in (curses.KEY_RIGHT, ord("l")):
+                    state.mode_switcher_idx = min(1, state.mode_switcher_idx + 1)
+                elif key in (9,):  # Tab toggles between modes
+                    state.mode_switcher_idx = 1 - state.mode_switcher_idx
+                elif key in (curses.KEY_DOWN, ord("j")):  # Down: return to top of left-hand pane
+                    state.mode_switcher_focused = False
+                    state.mode_switcher_idx = state.active_tab
+                    if state.active_tab == 0:
+                        state.active_panel = ActivePanel.LEFT
+                        state.left_focus_idx = 0
+                    else:
+                        state.lora_active_panel = "left"
+                        state.lora_left_focus_idx = 0
+                elif key in (10, 13, curses.KEY_ENTER, 32):  # Enter: confirm switching modes
+                    state.switch_mode(state.mode_switcher_idx)
+                    state.mode_switcher_focused = False
+                    if state.active_tab == 0:
+                        state.active_panel = ActivePanel.LEFT
+                        state.left_focus_idx = 0
+                    else:
+                        state.lora_active_panel = "left"
+                        state.lora_left_focus_idx = 0
 
             elif key == curses.KEY_F6:
                 added = state.add_current_lora_to_queue()

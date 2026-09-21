@@ -123,7 +123,7 @@ class LoraRunConfig:
     grad_accumulation_steps: int = 1
     mask_prompt: bool = True
     steps_per_report: int = 10
-    steps_per_eval: int = 200
+    steps_per_eval: int = 100
     val_batches: int = 25
     save_every: int = 100
     adapter_path: str = "adapters"

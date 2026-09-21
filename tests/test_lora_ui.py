@@ -166,7 +166,8 @@ class TestLoraUI(unittest.TestCase):
     @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
     @patch("mlx_commander.tui.app.init_colors")
     @patch("mlx_commander.tui.app.curses.curs_set")
-    def test_model_hyperparameters_rendered_in_white_font(self, mock_curs, mock_colors, mock_has_colors):
+    def test_no_redundant_model_and_params_in_right_panel(self, mock_curs, mock_colors, mock_has_colors):
+        """Verify that redundant Model: and Params: rows are removed from the right panel."""
         from mlx_commander.lora.model_info import ModelMetadata
         state = CommanderState()
         state.active_tab = 1
@@ -189,26 +190,11 @@ class TestLoraUI(unittest.TestCase):
         self.mock_win.getch.side_effect = [ord("q")]
         run_commander_tui(self.mock_win, initial_state=state)
 
-        # Verify safe_addstr or addstr was called with model metadata
         calls = self.mock_win.addstr.call_args_list
-        found_model = False
-        found_params = False
-        for c in calls:
-            args = c[0]
-            if len(args) >= 3 and isinstance(args[2], str):
-                text = args[2]
-                if "TestModel-3B" in text:
-                    found_model = True
-                    # Check that attr is not bold
-                    if len(args) >= 4:
-                        self.assertEqual(args[3] & curses.A_BOLD, 0)
-                if "28 layers" in text and "3072 dim" in text:
-                    found_params = True
-                    if len(args) >= 4:
-                        self.assertEqual(args[3] & curses.A_BOLD, 0)
-
-        self.assertTrue(found_model, "Base model name should be rendered in right panel")
-        self.assertTrue(found_params, "Base model architecture parameters should be rendered in right panel")
+        all_text = " ".join(c[0][2] for c in calls if len(c[0]) >= 3 and isinstance(c[0][2], str))
+        self.assertNotIn("• Model:", all_text)
+        self.assertNotIn("• Params:", all_text)
+        self.assertNotIn("Select a local model on drive to inspect architecture", all_text)
 
     @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
     @patch("mlx_commander.tui.app.init_colors")

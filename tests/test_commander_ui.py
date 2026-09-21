@@ -1156,6 +1156,72 @@ class TestCommanderUI(unittest.TestCase):
         mock_pick_folder.assert_not_called()
         mock_pick_model.assert_not_called()
 
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_mode_switcher_navigation_and_confirm_enter(self, mock_curs, mock_colors, mock_has_colors):
+        """
+        Verify Mode Switcher behavior:
+        - Pressing UP from top of left-hand pane takes user to Mode Switcher.
+        - Navigating with LEFT/RIGHT arrows changes selected mode without changing active mode.
+        - Pressing DOWN returns to top of left pane without switching mode.
+        - Pressing Enter confirms switching mode and focuses top of left pane in new mode.
+        """
+        state = CommanderState()
+        state.active_tab = 0
+        state.active_panel = ActivePanel.LEFT
+        state.left_focus_idx = 0
+
+        # 1. UP -> into mode switcher
+        # 2. RIGHT -> select Mode 2 (unconfirmed)
+        # 3. DOWN -> returns to top of left pane without switching
+        # 4. UP -> into mode switcher again
+        # 5. RIGHT -> select Mode 2
+        # 6. Enter (10) -> confirm mode switch to Mode 2!
+        # 7. 'q' -> quit
+        self.mock_win.getch.side_effect = [
+            curses.KEY_UP,
+            curses.KEY_RIGHT,
+            curses.KEY_DOWN,
+            curses.KEY_UP,
+            curses.KEY_RIGHT,
+            10,
+            ord("q"),
+        ]
+        run_commander_tui(self.mock_win, initial_state=state)
+
+        self.assertEqual(state.active_tab, 1, "Mode 2 should be active after Enter confirmation")
+        self.assertFalse(state.mode_switcher_focused, "Mode switcher should no longer be focused after Enter")
+        self.assertEqual(state.lora_active_panel, "left")
+        self.assertEqual(state.lora_left_focus_idx, 0, "Top of left-hand pane in Mode 2 should be focused")
+
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_mode_switcher_from_mode2_to_mode1(self, mock_curs, mock_colors, mock_has_colors):
+        """Verify pressing UP from top of Mode 2 left pane enters switcher, and Enter switches to Mode 1."""
+        state = CommanderState()
+        state.active_tab = 1
+        state.lora_active_panel = "left"
+        state.lora_left_focus_idx = 0
+
+        # 1. UP -> enters mode switcher (index 1)
+        # 2. LEFT -> select Mode 1
+        # 3. Enter (10) -> confirms mode switch to Mode 1
+        # 4. 'q' -> quit
+        self.mock_win.getch.side_effect = [
+            curses.KEY_UP,
+            curses.KEY_LEFT,
+            10,
+            ord("q"),
+        ]
+        run_commander_tui(self.mock_win, initial_state=state)
+
+        self.assertEqual(state.active_tab, 0, "Mode 1 should be active after Enter confirmation")
+        self.assertFalse(state.mode_switcher_focused, "Mode switcher should not be focused")
+        self.assertEqual(state.active_panel, ActivePanel.LEFT)
+        self.assertEqual(state.left_focus_idx, 0, "Top of left-hand pane in Mode 1 should be focused")
+
 
 if __name__ == "__main__":
     unittest.main()
