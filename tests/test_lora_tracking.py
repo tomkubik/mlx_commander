@@ -100,6 +100,24 @@ class TestLoraTracking(unittest.TestCase):
             self.assertEqual(fin_url, "https://wandb.ai/test_user/test-proj/runs/abc1234")
             mock_wandb.finish.assert_called_once_with(exit_code=0)
 
+    def test_wandb_login_uses_local_settings_without_network(self):
+        from mlx_commander.lora.tracking import clear_wandb_login_cache
+        mock_wandb = MagicMock()
+        mock_settings = MagicMock()
+        mock_settings.api_key = "test_key_123"
+        mock_settings.entity = "test_entity_direct"
+        mock_wandb.setup.return_value.settings = mock_settings
+
+        with patch.dict("sys.modules", {"wandb": mock_wandb}), \
+             patch.dict(os.environ, {}, clear=True), \
+             patch("mlx_commander.lora.tracking.is_wandb_available", return_value=True):
+            clear_wandb_login_cache()
+            logged_in, entity = is_wandb_logged_in()
+            self.assertTrue(logged_in)
+            self.assertEqual(entity, "test_entity_direct")
+            # Verify no network calls were made to Api().viewer
+            self.assertFalse(hasattr(mock_wandb, "Api") and mock_wandb.Api.called)
+
 
 if __name__ == "__main__":
     unittest.main()

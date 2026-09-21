@@ -6,6 +6,7 @@ Computes:
 3. Estimated Run Duration and Clock ETA
 """
 
+import functools
 import math
 import os
 import re
@@ -17,8 +18,9 @@ from typing import Any, Dict, Optional, Tuple
 from .config import LoraRunConfig
 
 
+@functools.lru_cache(maxsize=1)
 def get_hardware_memory_bytes() -> int:
-    """Return total physical Unified Memory in bytes on macOS (or fallback)."""
+    """Return total physical Unified Memory in bytes on macOS (or fallback). Cached."""
     try:
         out = subprocess.check_output(["sysctl", "-n", "hw.memsize"]).decode().strip()
         return int(out)
@@ -29,8 +31,9 @@ def get_hardware_memory_bytes() -> int:
             return 16 * 1024 * 1024 * 1024  # 16 GB fallback
 
 
+@functools.lru_cache(maxsize=1)
 def get_apple_silicon_chip() -> str:
-    """Detect Apple Silicon chip family string (e.g. 'Apple M3 Max')."""
+    """Detect Apple Silicon chip family string (e.g. 'Apple M3 Max'). Cached."""
     try:
         out = subprocess.check_output(["sysctl", "-n", "machdep.cpu.brand_string"]).decode().strip()
         if out:
@@ -38,6 +41,27 @@ def get_apple_silicon_chip() -> str:
     except Exception:
         pass
     return "Apple Silicon"
+
+
+@functools.lru_cache(maxsize=64)
+def _get_dir_safetensors_size_gb(dir_path_str: str) -> float:
+    """Calculate total size in GB of safetensors in directory, cached."""
+    try:
+        p = Path(dir_path_str)
+        if p.is_dir():
+            total = sum(f.stat().st_size for f in p.glob("*.safetensors"))
+            if total > 0:
+                return total / (1024 ** 3)
+    except Exception:
+        pass
+    return 0.0
+
+
+def clear_estimator_cache() -> None:
+    """Clear cached hardware info and directory size lookups."""
+    get_hardware_memory_bytes.cache_clear()
+    get_apple_silicon_chip.cache_clear()
+    _get_dir_safetensors_size_gb.cache_clear()
 
 
 def calculate_implied_epochs(iters: int, batch_size: int, total_train_records: int) -> Optional[float]:
@@ -93,10 +117,10 @@ def estimate_peak_memory(config: LoraRunConfig, total_ram_bytes: Optional[int] =
     # 1. Base model weights (GB)
     local_p = Path(config.model).expanduser()
     if local_p.exists() and local_p.is_dir():
-        # Check actual disk size of model files
-        total_size = sum(f.stat().st_size for f in local_p.glob("*.safetensors"))
-        if total_size > 0:
-            model_gb = total_size / (1024 ** 3)
+        # Check actual disk size of model files (cached)
+        dir_size_gb = _get_dir_safetensors_size_gb(str(local_p.resolve()))
+        if dir_size_gb > 0:
+            model_gb = dir_size_gb
         else:
             param_b = parse_model_param_billions(config.model)
             bytes_per_param = 0.55 if is_4bit_quantized(config.model) else 2.0

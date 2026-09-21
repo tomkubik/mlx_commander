@@ -80,3 +80,38 @@ class TestLoraEstimator(unittest.TestCase):
         self.assertIn("duration_str", res)
         self.assertIn("eta_clock", res)
         self.assertIn("iters_per_sec", res)
+
+    def test_hardware_estimator_caching(self):
+        from mlx_commander.lora.estimator import clear_estimator_cache
+        clear_estimator_cache()
+        # Verify lru_cache info
+        info1 = get_hardware_memory_bytes.cache_info()
+        get_hardware_memory_bytes()
+        get_hardware_memory_bytes()
+        info2 = get_hardware_memory_bytes.cache_info()
+        self.assertGreaterEqual(info2.hits, info1.hits + 1)
+
+    def test_state_record_count_and_estimate_caching(self):
+        import tempfile
+        from pathlib import Path
+        from mlx_commander.tui.state import CommanderState
+
+        state = CommanderState()
+        with tempfile.TemporaryDirectory() as td:
+            train_f = Path(td) / "train.jsonl"
+            train_f.write_text('{"prompt": "hi", "completion": "hello"}\n{"prompt": "a", "completion": "b"}\n')
+            state.lora_config.data = td
+
+            # First call reads file
+            c1 = state.get_train_record_count()
+            self.assertEqual(c1, 2)
+
+            # Second call should hit cache
+            c2 = state.get_train_record_count()
+            self.assertEqual(c2, 2)
+            self.assertIn(str(train_f.resolve()), state._cached_train_counts)
+
+            # Check estimate caching
+            est1 = state.get_memory_estimate()
+            est2 = state.get_memory_estimate()
+            self.assertIs(est1, est2)

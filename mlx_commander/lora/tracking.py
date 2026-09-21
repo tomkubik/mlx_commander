@@ -23,48 +23,88 @@ def is_wandb_available() -> bool:
         return False
 
 
-def is_wandb_logged_in() -> Tuple[bool, Optional[str]]:
-    """
-    Check if the user is authenticated with Weights & Biases on this system.
-    Returns (is_logged_in, entity_or_username).
-    """
+import functools
+
+
+@functools.lru_cache(maxsize=16)
+def _check_wandb_logged_in_cached(
+    env_key: Optional[str],
+    env_entity: Optional[str],
+    netrc_mtime: Optional[float],
+) -> Tuple[bool, Optional[str]]:
     # 1. Environment variable
-    if os.environ.get("WANDB_API_KEY"):
-        try:
-            import wandb
-            api = wandb.Api()
-            return True, api.viewer.entity or api.default_entity
-        except Exception:
-            return True, "env_user"
+    if env_key:
+        entity = env_entity
+        if not entity:
+            try:
+                import wandb
+                entity = getattr(wandb.setup().settings, "entity", None)
+            except Exception:
+                pass
+        return True, entity or "env_user"
 
     # 2. Check ~/.netrc
-    netrc_path = Path("~/.netrc").expanduser()
-    if netrc_path.exists():
+    if netrc_mtime is not None:
         try:
-            with open(netrc_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            if "api.wandb.ai" in content:
-                # User has logged in via 'wandb login'
+            import netrc as py_netrc
+            auths = py_netrc.netrc().authenticators("api.wandb.ai")
+            if auths:
+                login_user = auths[0]
+                if login_user and login_user != "user":
+                    return True, login_user
                 try:
                     import wandb
-                    api = wandb.Api()
-                    return True, api.viewer.entity or api.default_entity
+                    entity = getattr(wandb.setup().settings, "entity", None)
+                    if entity:
+                        return True, entity
                 except Exception:
-                    return True, "wandb_user"
+                    pass
+                return True, "wandb_user"
         except Exception:
-            pass
+            try:
+                netrc_path = Path("~/.netrc").expanduser()
+                with open(netrc_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                if "api.wandb.ai" in content:
+                    return True, "wandb_user"
+            except Exception:
+                pass
 
     # 3. Check wandb API credentials directly if library is installed
     if is_wandb_available():
         try:
             import wandb
-            api = wandb.Api()
-            if api.api_key:
-                return True, api.viewer.entity or api.default_entity
+            settings = wandb.setup().settings
+            if getattr(settings, "api_key", None):
+                return True, getattr(settings, "entity", None) or "wandb_user"
         except Exception:
             pass
 
     return False, None
+
+
+def is_wandb_logged_in() -> Tuple[bool, Optional[str]]:
+    """
+    Check if the user is authenticated with Weights & Biases on this system.
+    Returns (is_logged_in, entity_or_username).
+    Completely eliminates synchronous network calls to prevent TUI rendering latency.
+    """
+    env_key = os.environ.get("WANDB_API_KEY")
+    env_entity = os.environ.get("WANDB_ENTITY")
+    netrc_mtime: Optional[float] = None
+    try:
+        netrc_p = Path("~/.netrc").expanduser()
+        if netrc_p.exists():
+            netrc_mtime = netrc_p.stat().st_mtime
+    except Exception:
+        pass
+
+    return _check_wandb_logged_in_cached(env_key, env_entity, netrc_mtime)
+
+
+def clear_wandb_login_cache() -> None:
+    """Clear cached W&B login status check."""
+    _check_wandb_logged_in_cached.cache_clear()
 
 
 def parse_mlx_log_line(line: str) -> Optional[Dict[str, Any]]:

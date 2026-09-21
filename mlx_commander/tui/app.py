@@ -665,10 +665,8 @@ def _draw_mode2_dashboard(
     right_edge = max_x - 3
     cfg = state.lora_config
 
-    # Read base model metadata
-    meta = state.current_model_metadata
-    if meta is None or (state.lora_config.model and meta.path != state.lora_config.model and meta.name != state.lora_config.model):
-        meta = state.inspect_current_model()
+    # Read base model metadata (cached in state)
+    meta = state.inspect_current_model()
 
     # Base Model Name and Architecture Hyperparameters (Non-input fields, non-bold white font)
     white_unbold = get_color(COLOR_NORMAL_TEXT) if curses.has_colors() else 0
@@ -767,17 +765,7 @@ def _draw_mode2_dashboard(
 
     # Implied Epochs (Row 1)
     epochs = state.get_implied_epochs()
-    train_count = 0
-    if state.loaded_dataset:
-        train_count = state.get_split_counts().get("train", 0)
-    elif state.lora_config.data:
-        tf = Path(state.lora_config.data) / "train.jsonl"
-        if tf.exists():
-            try:
-                with open(tf, "rb") as f:
-                    train_count = sum(1 for _ in f)
-            except Exception:
-                pass
+    train_count = state.get_train_record_count()
 
     gray_unbold = (get_color(COLOR_LABEL_GRAY) | curses.A_DIM) if curses.has_colors() else curses.A_DIM
 

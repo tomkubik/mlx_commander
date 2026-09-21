@@ -9,7 +9,7 @@ import os
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from mlx_commander.exceptions import MissingDependencyError
 from mlx_commander.converter import ConversionResult, convert_and_save
@@ -111,6 +111,15 @@ class CommanderState:
     wandb_enabled: bool = True
     wandb_project: str = "mlx-commander"
 
+    # Performance & Caching
+    _cached_wandb_status: Optional[Dict[str, Any]] = None
+    _inspected_model_target: Optional[str] = None
+    _cached_train_counts: Dict[str, Tuple[float, int]] = field(default_factory=dict)
+    _cached_mem_estimate: Optional[Dict[str, Any]] = None
+    _cached_mem_key: Optional[Tuple] = None
+    _cached_dur_estimate: Optional[Dict[str, Any]] = None
+    _cached_dur_key: Optional[Tuple] = None
+
     def __post_init__(self) -> None:
         if self.output_dir:
             self.has_custom_output_dir = True
@@ -133,23 +142,35 @@ class CommanderState:
         self.inspect_current_model()
         self.update_deterministic_lora_name()
 
-    def inspect_current_model(self) -> ModelMetadata:
+    def inspect_current_model(self, force: bool = False) -> ModelMetadata:
         """Inspect and cache base model architecture metadata."""
+        if not force and self.current_model_metadata is not None:
+            if (
+                self._inspected_model_target == self.lora_config.model
+                or self.current_model_metadata.path == self.lora_config.model
+                or self.current_model_metadata.name == self.lora_config.model
+            ):
+                self._inspected_model_target = self.lora_config.model
+                return self.current_model_metadata
         meta = inspect_local_model(self.lora_config.model)
         self.current_model_metadata = meta
+        self._inspected_model_target = self.lora_config.model
         return meta
 
-    def get_wandb_status(self) -> Dict[str, Any]:
-        """Return W&B availability and authentication status."""
+    def get_wandb_status(self, force_refresh: bool = False) -> Dict[str, Any]:
+        """Return W&B availability and authentication status (cached)."""
+        if self._cached_wandb_status is not None and not force_refresh:
+            return self._cached_wandb_status
         avail = is_wandb_available()
         logged_in, entity = is_wandb_logged_in() if avail else (False, None)
-        return {
+        self._cached_wandb_status = {
             "available": avail,
             "logged_in": logged_in,
             "entity": entity,
             "enabled": self.wandb_enabled and avail and logged_in,
             "project": self.wandb_project,
         }
+        return self._cached_wandb_status
 
     def update_deterministic_lora_name(self) -> None:
         """Update current form lora_config run name and adapter path deterministically if not custom."""
@@ -168,27 +189,55 @@ class CommanderState:
             self.lora_config.name = new_name
             self.lora_config.adapter_path = f"adapters/{new_name}"
 
-    def get_implied_epochs(self) -> Optional[float]:
-        """Calculate implied epochs: (iters * batch_size) / train_records."""
-        train_count = 0
+    def get_train_record_count(self) -> int:
+        """Return the number of train records, cached by file mtime to eliminate disk I/O during render."""
         if self.loaded_dataset:
             split_counts = self.get_split_counts()
-            train_count = split_counts.get("train", 0)
-        if train_count == 0 and self.lora_config.data:
+            return split_counts.get("train", 0)
+        if self.lora_config.data:
             train_f = Path(self.lora_config.data) / "train.jsonl"
             if train_f.exists():
                 try:
+                    mtime = train_f.stat().st_mtime
+                    cache_key = str(train_f.resolve())
+                    if cache_key in self._cached_train_counts:
+                        cached_mtime, cached_cnt = self._cached_train_counts[cache_key]
+                        if cached_mtime == mtime:
+                            return cached_cnt
                     with open(train_f, "rb") as f:
-                        train_count = sum(1 for _ in f)
+                        cnt = sum(1 for _ in f)
+                    self._cached_train_counts[cache_key] = (mtime, cnt)
+                    return cnt
                 except Exception:
                     pass
+        return 0
+
+    def get_implied_epochs(self) -> Optional[float]:
+        """Calculate implied epochs: (iters * batch_size) / train_records."""
+        train_count = self.get_train_record_count()
         return calculate_implied_epochs(self.lora_config.iters, self.lora_config.batch_size, train_count)
 
     def get_memory_estimate(self) -> Dict[str, Any]:
-        return estimate_peak_memory(self.lora_config)
+        """Return peak memory estimate (cached by configuration parameters)."""
+        cfg = self.lora_config
+        key = (cfg.model, cfg.batch_size, cfg.max_seq_length, cfg.lora_rank, cfg.num_layers, cfg.grad_checkpoint)
+        if self._cached_mem_key == key and self._cached_mem_estimate is not None:
+            return self._cached_mem_estimate
+        est = estimate_peak_memory(cfg)
+        self._cached_mem_key = key
+        self._cached_mem_estimate = est
+        return est
 
     def get_duration_estimate(self) -> Dict[str, Any]:
-        return estimate_duration(self.lora_config)
+        """Return training duration estimate (cached by configuration parameters)."""
+        cfg = self.lora_config
+        key = (cfg.model, cfg.iters, cfg.batch_size, cfg.max_seq_length)
+        if self._cached_dur_key == key and self._cached_dur_estimate is not None:
+            return self._cached_dur_estimate
+        est = estimate_duration(cfg)
+        self._cached_dur_key = key
+        self._cached_dur_estimate = est
+        return est
 
     def sync_dataset_to_lora(self) -> None:
         """Pre-populate the LoRA dataset directory from the active conversion target or source."""
