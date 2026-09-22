@@ -4,15 +4,118 @@ Executes queued fine-tuning runs one-by-one, streams real-time logs,
 tracks progress in queue.json, and fires desktop notifications upon completion.
 """
 
+import json
 import os
+import re
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple, Union
 
+from .config import LoraRunConfig, format_adapter_filename
 from .queue import QueueManager
 from .tracking import WandbTracker
+
+
+def rename_saved_adapters(
+    adapter_dir: Union[str, Path],
+    config: Optional[LoraRunConfig] = None,
+    final_iters: Optional[int] = None,
+    create_symlinks: bool = True,
+) -> List[Tuple[Path, Path]]:
+    """
+    Scan adapter_dir for saved MLX adapter checkpoint files and rename them
+    so that each filename starts with the iteration count at which it was saved,
+    and has all training hyperparameters appended to the name.
+
+    Maintains relative symlinks (e.g. 'adapters.safetensors' and
+    '0000100_adapters.safetensors') pointing to the renamed files so native
+    MLX evaluation, generation, and resume workflows remain 100% compatible.
+
+    Returns:
+        List of (original_path, new_path) tuples that were renamed.
+    """
+    adir = Path(adapter_dir)
+    if not adir.exists() or not adir.is_dir():
+        return []
+
+    # If config is None, attempt to load minimal config from adapter_config.json if present
+    if config is None and (adir / "adapter_config.json").is_file():
+        try:
+            with open(adir / "adapter_config.json", "r", encoding="utf-8") as acf:
+                ac_data = json.load(acf)
+            lora_p = ac_data.get("lora_parameters", {})
+            config = LoraRunConfig(
+                model=ac_data.get("model", "model"),
+                lora_rank=lora_p.get("rank", 8),
+                lora_alpha=lora_p.get("scale", 16.0),
+                lora_dropout=lora_p.get("dropout", 0.0),
+            )
+        except Exception:
+            pass
+
+    renamed: List[Tuple[Path, Path]] = []
+
+    # 1. Step Checkpoints: e.g. 0000100_adapters.safetensors
+    # Strictly match <digits>_adapters.safetensors (not already renamed with hyperparameters)
+    step_pattern = re.compile(r"^(\d+)_adapters\.safetensors$")
+    try:
+        items = sorted(list(adir.iterdir()))
+    except OSError:
+        return []
+
+    for item in items:
+        if item.is_symlink():
+            continue
+        m = step_pattern.match(item.name)
+        if m:
+            step = int(m.group(1))
+            target_name = format_adapter_filename(step=step, config=config)
+            target_path = adir / target_name
+            if target_path != item:
+                if target_path.exists():
+                    try:
+                        target_path.unlink()
+                    except OSError:
+                        pass
+                try:
+                    item.rename(target_path)
+                    renamed.append((item, target_path))
+
+                    if create_symlinks:
+                        try:
+                            # Create relative symlink: item.name -> target_name
+                            item.symlink_to(target_name)
+                        except OSError:
+                            pass
+                except OSError:
+                    pass
+
+    # 2. Final Adapter Weights: adapters.safetensors
+    final_file = adir / "adapters.safetensors"
+    if final_file.exists() and not final_file.is_symlink():
+        step = final_iters if final_iters is not None else (config.iters if config else 1000)
+        target_name = format_adapter_filename(step=step, config=config)
+        target_path = adir / target_name
+
+        if target_path != final_file:
+            try:
+                if target_path.exists():
+                    final_file.unlink()
+                else:
+                    final_file.rename(target_path)
+                    renamed.append((final_file, target_path))
+
+                if create_symlinks:
+                    try:
+                        final_file.symlink_to(target_name)
+                    except OSError:
+                        pass
+            except OSError:
+                pass
+
+    return renamed
 
 
 def notify_macos(title: str, message: str) -> None:
@@ -73,6 +176,17 @@ def execute_single_run(
                 lf.write(line)
                 lf.flush()
                 tracker.log_line(line)
+                if "save" in line.lower() or "saved" in line.lower() or "iter" in line.lower():
+                    try:
+                        new_renamed = rename_saved_adapters(r.adapter_path, r)
+                        for orig, dest in new_renamed:
+                            msg = f"  [Adapter Checkpoint] Saved: {dest.name}\n"
+                            sys.stdout.write(msg)
+                            sys.stdout.flush()
+                            lf.write(msg)
+                            lf.flush()
+                    except Exception:
+                        pass
             proc.stdout.close()
             code = proc.wait()
         except FileNotFoundError:
@@ -90,6 +204,17 @@ def execute_single_run(
                     lf.write(line)
                     lf.flush()
                     tracker.log_line(line)
+                    if "save" in line.lower() or "saved" in line.lower() or "iter" in line.lower():
+                        try:
+                            new_renamed = rename_saved_adapters(r.adapter_path, r)
+                            for orig, dest in new_renamed:
+                                msg = f"  [Adapter Checkpoint] Saved: {dest.name}\n"
+                                sys.stdout.write(msg)
+                                sys.stdout.flush()
+                                lf.write(msg)
+                                lf.flush()
+                        except Exception:
+                            pass
                 proc.stdout.close()
                 code = proc.wait()
             except Exception as e:
@@ -102,6 +227,19 @@ def execute_single_run(
             sys.stderr.write(err_str + "\n")
             lf.write(err_str + "\n")
             code = 1
+
+    # Final pass to ensure all saved adapters (intermediate checkpoints & final weights) have hyperparameters
+    try:
+        final_renamed = rename_saved_adapters(r.adapter_path, r, final_iters=r.iters)
+        for orig, dest in final_renamed:
+            msg = f"  [Adapter Saved] {orig.name} -> {dest.name}\n"
+            sys.stdout.write(msg)
+            sys.stdout.flush()
+            with open(log_file, "a", encoding="utf-8") as lf:
+                lf.write(msg)
+                lf.flush()
+    except Exception:
+        pass
 
     wandb_url = tracker.finish_run(exit_code=code)
     if wandb_url:
@@ -166,3 +304,20 @@ def run_lora_queue(
         f"Finished {total_runs} fine-tuning run(s): {completed_count} succeeded, {failed_count} failed.",
     )
     return 0 if failed_count == 0 else 1
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="MLX Commander LoRA runner and adapter utility.")
+    parser.add_argument("--rename-adapters", type=str, help="Directory containing saved adapters to rename.")
+    parser.add_argument("--config", type=str, help="Path to run YAML config file.")
+    parser.add_argument("--iters", type=int, default=None, help="Total training iterations.")
+    cli_args = parser.parse_args()
+
+    if cli_args.rename_adapters:
+        cfg = None
+        if cli_args.config and Path(cli_args.config).exists():
+            cfg = LoraRunConfig.from_yaml(cli_args.config)
+        res = rename_saved_adapters(cli_args.rename_adapters, config=cfg, final_iters=cli_args.iters)
+        for orig, dest in res:
+            print(f"[OK] Renamed: {orig.name} -> {dest.name}")

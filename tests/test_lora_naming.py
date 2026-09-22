@@ -129,6 +129,75 @@ class TestLoraNaming(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_generate_hyperparameters_slug(self):
+        from mlx_commander.lora.config import generate_hyperparameters_slug
+        slug = generate_hyperparameters_slug(
+            fine_tune_type="lora",
+            rank=16,
+            alpha=32.0,
+            learning_rate=1e-5,
+            batch_size=4,
+            iters=1000,
+            model_name="mlx-community/Llama-3.2-3B-Instruct-4bit",
+        )
+        self.assertEqual(slug, "lora_r16_a32_lr1e-5_b4_i1000_Llama-3.2-3B-Instruct-4bit")
+
+    def test_format_adapter_filename(self):
+        from mlx_commander.lora.config import format_adapter_filename
+        fname1 = format_adapter_filename(
+            step=100,
+            fine_tune_type="lora",
+            rank=16,
+            alpha=32.0,
+            learning_rate=1e-5,
+            batch_size=4,
+            iters=1000,
+            model_name="mlx-community/Llama-3.2-3B-Instruct-4bit",
+        )
+        self.assertEqual(
+            fname1,
+            "0000100_adapters_lora_r16_a32_lr1e-5_b4_i1000_Llama-3.2-3B-Instruct-4bit.safetensors",
+        )
+
+        cfg = LoraRunConfig(
+            model="mlx-community/Qwen2.5-7B-Instruct-4bit",
+            fine_tune_type="dora",
+            lora_rank=8,
+            lora_alpha=16.0,
+            learning_rate=3e-5,
+            batch_size=8,
+            iters=500,
+        )
+        fname2 = cfg.format_adapter_filename(step=250)
+        self.assertEqual(
+            fname2,
+            "0000250_adapters_dora_r8_a16_lr3e-5_b8_i500_Qwen2.5-7B-Instruct-4bit.safetensors",
+        )
+
+        final_fname = cfg.format_adapter_filename(step=cfg.iters)
+        self.assertEqual(
+            final_fname,
+            "0000500_adapters_dora_r8_a16_lr3e-5_b8_i500_Qwen2.5-7B-Instruct-4bit.safetensors",
+        )
+
+    def test_lora_run_config_from_yaml(self):
+        cfg = LoraRunConfig(
+            model="mlx-community/Mistral-7B-Instruct-v0.3-4bit",
+            learning_rate=2e-5,
+            lora_rank=32,
+            lora_alpha=64.0,
+            batch_size=2,
+            iters=800,
+        )
+        yaml_str = cfg.to_mlx_yaml()
+        loaded = LoraRunConfig.from_yaml(yaml_str)
+        self.assertEqual(loaded.model, "mlx-community/Mistral-7B-Instruct-v0.3-4bit")
+        self.assertEqual(loaded.learning_rate, 2e-5)
+        self.assertEqual(loaded.lora_rank, 32)
+        self.assertEqual(loaded.lora_alpha, 64.0)
+        self.assertEqual(loaded.batch_size, 2)
+        self.assertEqual(loaded.iters, 800)
+
 
 if __name__ == "__main__":
     unittest.main()

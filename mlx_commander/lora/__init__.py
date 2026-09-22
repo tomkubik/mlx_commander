@@ -8,7 +8,9 @@ from .config import (
     POPULAR_MLX_MODELS,
     LoraRunConfig,
     format_learning_rate,
+    format_adapter_filename,
     generate_deterministic_run_name,
+    generate_hyperparameters_slug,
     sanitize_model_slug,
 )
 from .estimator import (
@@ -24,7 +26,7 @@ from .model_info import (
     scan_local_models,
 )
 from .queue import QueueManager
-from .runner import run_lora_queue
+from .runner import rename_saved_adapters, run_lora_queue
 from .tracking import (
     WandbTracker,
     is_wandb_available,
@@ -35,6 +37,7 @@ from .tracking import (
 __all__ = [
     "LoraRunConfig",
     "QueueManager",
+    "rename_saved_adapters",
     "run_lora_queue",
     "calculate_implied_epochs",
     "estimate_peak_memory",
@@ -44,7 +47,9 @@ __all__ = [
     "POPULAR_MLX_MODELS",
     "FINE_TUNE_TYPES",
     "OPTIMIZERS",
+    "format_adapter_filename",
     "generate_deterministic_run_name",
+    "generate_hyperparameters_slug",
     "sanitize_model_slug",
     "format_learning_rate",
     "WandbTracker",

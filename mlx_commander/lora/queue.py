@@ -57,7 +57,7 @@ class QueueManager:
             r.log_file = str(self.logs_dir / f"{r.id}.log")
 
         data = {
-            "version": "0.3.23",
+            "version": "0.3.24",
             "queue_dir": str(self.queue_dir),
             "runs": [r.to_dict() for r in self.runs],
         }
@@ -197,6 +197,7 @@ class QueueManager:
                 f"echo '  Log:    {log_file}'",
                 "echo '---------------------------------------------------'",
                 f'mlx_lm.lora --config "{cfg_file}" 2>&1 | tee "{log_file}"',
+                f'python3 -m mlx_commander.lora.runner --rename-adapters "{r.adapter_path}" --config "{cfg_file}" 2>&1 | tee -a "{log_file}"',
                 f"echo '✔ [{idx}/{len(self.runs)}] Completed: {r.name}'",
             ])
         lines.extend([

@@ -47,9 +47,8 @@ def format_learning_rate(lr: float) -> str:
     return s.replace(".", "p")
 
 
-def generate_deterministic_run_name(
+def generate_hyperparameters_slug(
     config: Optional["LoraRunConfig"] = None,
-    index: int = 1,
     implied_epochs: Optional[float] = None,
     *,
     fine_tune_type: Optional[str] = None,
@@ -61,11 +60,11 @@ def generate_deterministic_run_name(
     model_name: Optional[str] = None,
 ) -> str:
     """
-    Generate a deterministic, self-documenting run name and directory slug.
+    Generate the self-documenting hyperparameters slug without index prefix.
     Structure:
-      {index:02d}_{method}_r{rank}_a{alpha}_lr{lr}_b{batch}_i{iters}_{model_slug}
+      {method}_r{rank}_a{alpha}_lr{lr}_b{batch}_i{iters}_{model_slug}
     Example:
-      01_lora_r16_a32_lr1e-5_b4_i1000_Llama-3.2-3B-Instruct-4bit
+      lora_r16_a32_lr1e-5_b4_i1000_Llama-3.2-3B-Instruct-4bit
     """
     if config is not None:
         method = config.fine_tune_type.lower()
@@ -87,7 +86,7 @@ def generate_deterministic_run_name(
     lr_str = format_learning_rate(lr_val)
     model_slug = sanitize_model_slug(m_name)
 
-    parts = [f"{index:02d}", method]
+    parts = [method]
     if method in ("lora", "dora"):
         parts.append(f"r{r_val}")
         alpha_val = int(a_val) if isinstance(a_val, (int, float)) and float(a_val).is_integer() else a_val
@@ -99,6 +98,80 @@ def generate_deterministic_run_name(
         parts.append(f"ep{implied_epochs:.1f}".replace(".", "p"))
     parts.append(model_slug)
     return "_".join(parts)
+
+
+def generate_deterministic_run_name(
+    config: Optional["LoraRunConfig"] = None,
+    index: int = 1,
+    implied_epochs: Optional[float] = None,
+    *,
+    fine_tune_type: Optional[str] = None,
+    rank: Optional[int] = None,
+    alpha: Optional[float] = None,
+    learning_rate: Optional[float] = None,
+    batch_size: Optional[int] = None,
+    iters: Optional[int] = None,
+    model_name: Optional[str] = None,
+) -> str:
+    """
+    Generate a deterministic, self-documenting run name and directory slug.
+    Structure:
+      {index:02d}_{method}_r{rank}_a{alpha}_lr{lr}_b{batch}_i{iters}_{model_slug}
+    Example:
+      01_lora_r16_a32_lr1e-5_b4_i1000_Llama-3.2-3B-Instruct-4bit
+    """
+    slug = generate_hyperparameters_slug(
+        config=config,
+        implied_epochs=implied_epochs,
+        fine_tune_type=fine_tune_type,
+        rank=rank,
+        alpha=alpha,
+        learning_rate=learning_rate,
+        batch_size=batch_size,
+        iters=iters,
+        model_name=model_name,
+    )
+    return f"{index:02d}_{slug}"
+
+
+def format_adapter_filename(
+    step: int,
+    config: Optional["LoraRunConfig"] = None,
+    *,
+    implied_epochs: Optional[float] = None,
+    prefix: str = "adapters",
+    extension: str = ".safetensors",
+    fine_tune_type: Optional[str] = None,
+    rank: Optional[int] = None,
+    alpha: Optional[float] = None,
+    learning_rate: Optional[float] = None,
+    batch_size: Optional[int] = None,
+    iters: Optional[int] = None,
+    model_name: Optional[str] = None,
+) -> str:
+    """
+    Format a saved adapter filename starting with the iteration count at which it was saved,
+    with all training hyperparameters appended.
+    Structure:
+      {step:07d}_{prefix}_{hyperparameters_slug}{extension}
+    Example:
+      0000100_adapters_lora_r16_a32_lr1e-5_b4_i1000_Llama-3.2-3B-Instruct-4bit.safetensors
+    """
+    slug = generate_hyperparameters_slug(
+        config=config,
+        implied_epochs=implied_epochs,
+        fine_tune_type=fine_tune_type,
+        rank=rank,
+        alpha=alpha,
+        learning_rate=learning_rate,
+        batch_size=batch_size,
+        iters=iters,
+        model_name=model_name,
+    )
+    step_str = f"{step:07d}" if isinstance(step, int) and step >= 0 else str(step)
+    if prefix:
+        return f"{step_str}_{prefix}_{slug}{extension}"
+    return f"{step_str}_{slug}{extension}"
 
 
 @dataclass
@@ -156,6 +229,26 @@ class LoraRunConfig:
         if not self.adapter_path or self.adapter_path == "adapters":
             self.adapter_path = f"adapters/{self.name}"
 
+    def get_hyperparameters_slug(self, implied_epochs: Optional[float] = None) -> str:
+        """Get the self-documenting hyperparameters slug for this run configuration."""
+        return generate_hyperparameters_slug(self, implied_epochs=implied_epochs)
+
+    def format_adapter_filename(
+        self,
+        step: int,
+        prefix: str = "adapters",
+        extension: str = ".safetensors",
+        implied_epochs: Optional[float] = None,
+    ) -> str:
+        """Format a saved adapter filename starting with step count and with all hyperparameters appended."""
+        return format_adapter_filename(
+            step=step,
+            config=self,
+            prefix=prefix,
+            extension=extension,
+            implied_epochs=implied_epochs,
+        )
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
@@ -163,6 +256,70 @@ class LoraRunConfig:
     def from_dict(cls, data: Dict[str, Any]) -> "LoraRunConfig":
         clean_data = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
         return cls(**clean_data)
+
+    @classmethod
+    def from_yaml(cls, source: Any) -> "LoraRunConfig":
+        """Parse a LoraRunConfig from a YAML file path or YAML-formatted string."""
+        content = ""
+        try:
+            p = Path(source)
+            if p.is_file():
+                content = p.read_text(encoding="utf-8")
+            else:
+                content = str(source)
+        except Exception:
+            content = str(source)
+
+        data: Dict[str, Any] = {}
+        for raw_line in content.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or line.startswith("lora_parameters:"):
+                continue
+            if ":" in line:
+                k, v = line.split(":", 1)
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                if k == "rank":
+                    try:
+                        data["lora_rank"] = int(v)
+                    except ValueError:
+                        pass
+                elif k == "scale":
+                    try:
+                        data["lora_alpha"] = float(v)
+                    except ValueError:
+                        pass
+                elif k == "dropout":
+                    try:
+                        data["lora_dropout"] = float(v)
+                    except ValueError:
+                        pass
+                elif k in (
+                    "batch_size",
+                    "iters",
+                    "val_batches",
+                    "steps_per_report",
+                    "steps_per_eval",
+                    "save_every",
+                    "max_seq_length",
+                    "grad_accumulation_steps",
+                    "seed",
+                    "num_layers",
+                ):
+                    try:
+                        data[k] = int(v)
+                    except ValueError:
+                        pass
+                elif k == "learning_rate":
+                    try:
+                        data[k] = float(v)
+                    except ValueError:
+                        pass
+                elif k in ("train", "test", "grad_checkpoint", "mask_prompt"):
+                    data[k] = v.lower() == "true"
+                else:
+                    data[k] = v
+        return cls.from_dict(data)
 
     def to_mlx_yaml(self) -> str:
         """Generate YAML configuration compliant with mlx_lm.lora --config schema."""
