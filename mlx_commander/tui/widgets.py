@@ -1895,7 +1895,7 @@ def show_model_picker_dialog(
 
     configure_escdelay(25)
     options: List[Tuple[str, str]] = [
-        ("[ 📁 Browse Drive with Finder... ]", "Select model folder or config.json via Finder"),
+        ("[ 📁 Browse Drive with Finder... ]", "Select model folder (or any file inside it) via Finder"),
         ("[ ✍ Enter Local Model Path Manually... ]", "Enter path to model directory or weights"),
     ]
 
@@ -1960,14 +1960,15 @@ def show_model_picker_dialog(
         elif k in (27, ord("q"), ord("Q")):
             return None
         elif k in (10, 13, 32):  # Enter or Space
+            from mlx_commander.lora.model_info import normalize_model_path
             if sel_idx == 0:  # Browse Drive with Finder
                 curses.def_prog_mode()
                 curses.endwin()
-                chosen = pick_model_gui(prompt="Select Local Base Model (Folder or File)", default_dir=current_model or os.getcwd())
+                chosen = pick_model_gui(prompt="Select Local Base Model Folder (or any file inside it)", default_dir=current_model or os.getcwd())
                 curses.reset_prog_mode()
                 stdscr.refresh()
                 if chosen and chosen.strip():
-                    return chosen.strip()
+                    return normalize_model_path(chosen.strip())
                 # If Finder was cancelled or not supported, continue dialog
                 continue
             elif sel_idx == 1:  # Enter Local Model Path Manually
@@ -1978,14 +1979,14 @@ def show_model_picker_dialog(
                     default_val=current_model,
                 )
                 if val and val.strip():
-                    return val.strip()
+                    return normalize_model_path(val.strip())
                 return None
             else:
                 # Discovered model selected
                 disc_idx = sel_idx - 2
                 if 0 <= disc_idx < len(discovered):
-                    return discovered[disc_idx].path
-                return options[sel_idx][0]
+                    return normalize_model_path(discovered[disc_idx].path)
+                return normalize_model_path(options[sel_idx][0])
 
 
 def show_dataset_picker_dialog(

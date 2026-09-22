@@ -115,3 +115,27 @@ class TestLoraEstimator(unittest.TestCase):
             est1 = state.get_memory_estimate()
             est2 = state.get_memory_estimate()
             self.assertIs(est1, est2)
+
+    def test_estimate_peak_memory_local_dir_with_safetensors(self):
+        """Verify selecting a real local folder with .safetensors files never causes param_b UnboundLocalError."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td)
+            # Create dummy config.json and multiple safetensors shards
+            (p / "config.json").write_text('{"architectures": ["LlamaForCausalLM"], "model_type": "llama"}')
+            (p / "model-00001-of-00004.safetensors").write_bytes(b"0" * (1024 * 1024 * 10))  # 10 MB
+            (p / "model-00002-of-00004.safetensors").write_bytes(b"0" * (1024 * 1024 * 10))  # 10 MB
+
+            cfg = LoraRunConfig(model=str(p))
+            res = estimate_peak_memory(cfg)
+            self.assertIn("peak_gb", res)
+            self.assertIn("act_gb", res)
+            self.assertGreater(res["peak_gb"], 0)
+
+            # Test passing a specific shard file directly
+            cfg_file = LoraRunConfig(model=str(p / "model-00001-of-00004.safetensors"))
+            res_file = estimate_peak_memory(cfg_file)
+            self.assertIn("peak_gb", res_file)
+            self.assertGreater(res_file["peak_gb"], 0)

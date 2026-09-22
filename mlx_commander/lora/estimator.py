@@ -45,11 +45,16 @@ def get_apple_silicon_chip() -> str:
 
 @functools.lru_cache(maxsize=64)
 def _get_dir_safetensors_size_gb(dir_path_str: str) -> float:
-    """Calculate total size in GB of safetensors in directory, cached."""
+    """Calculate total size in GB of model weight files in directory, cached."""
     try:
         p = Path(dir_path_str)
+        if p.is_file():
+            p = p.parent
         if p.is_dir():
-            total = sum(f.stat().st_size for f in p.glob("*.safetensors"))
+            patterns = ("*.safetensors", "*.bin", "*.mlx", "*.pt", "*.npz")
+            total = 0
+            for pat in patterns:
+                total += sum(f.stat().st_size for f in p.glob(pat))
             if total > 0:
                 return total / (1024 ** 3)
     except Exception:
@@ -114,19 +119,25 @@ def estimate_peak_memory(config: LoraRunConfig, total_ram_bytes: Optional[int] =
         total_ram_bytes = get_hardware_memory_bytes()
     total_ram_gb = total_ram_bytes / (1024 ** 3)
 
-    # 1. Base model weights (GB)
+    # 1. Base model weights (GB) & Parameter count
+    param_b = parse_model_param_billions(config.model)
     local_p = Path(config.model).expanduser()
+    if local_p.is_file():
+        local_p = local_p.parent
     if local_p.exists() and local_p.is_dir():
         # Check actual disk size of model files (cached)
         dir_size_gb = _get_dir_safetensors_size_gb(str(local_p.resolve()))
         if dir_size_gb > 0:
             model_gb = dir_size_gb
+            # If param_b was not specifically parsed from model name (fell back to 7.0),
+            # refine param_b estimate from the actual weight files
+            if "7b" not in config.model.lower() and param_b == 7.0:
+                bytes_per_param = 0.55 if is_4bit_quantized(config.model) else 2.0
+                param_b = max(0.5, round(dir_size_gb / bytes_per_param, 1))
         else:
-            param_b = parse_model_param_billions(config.model)
             bytes_per_param = 0.55 if is_4bit_quantized(config.model) else 2.0
             model_gb = param_b * bytes_per_param
     else:
-        param_b = parse_model_param_billions(config.model)
         bytes_per_param = 0.55 if is_4bit_quantized(config.model) else 2.0
         model_gb = param_b * bytes_per_param
 

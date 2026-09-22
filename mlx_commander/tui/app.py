@@ -1132,12 +1132,35 @@ def _handle_mode1_input(
             if state.left_focus_idx == 0:  # Dataset field
                 chosen = show_dataset_source_dialog(stdscr, state.dataset_path)
                 if chosen:
-                    if not state.load_dataset(chosen):
-                        if state.last_missing_dependency:
-                            if show_missing_dependency_dialog(stdscr, state.last_missing_dependency):
-                                state.load_dataset(chosen)
-                        else:
-                            show_error_dialog(stdscr, "Dataset Loading Failed", state.status_message)
+                    from mlx_commander.lora.model_info import is_model_directory, inspect_local_model
+                    chosen_p = Path(chosen.strip()).expanduser()
+                    if is_model_directory(chosen_p):
+                        meta = inspect_local_model(str(chosen_p))
+                        size_txt = f" ({meta.architecture}, {meta.file_size_gb:.1f} GB)" if meta.file_size_gb > 0 else ""
+                        switch_opt = "Switch to Mode 2 (Fine-Tuning Single Run) & set as Base Model"
+                        cancel_opt = "Cancel (Stay in Dataset Converter)"
+                        choice = show_choice_dialog(
+                            stdscr,
+                            "Model Directory Selected",
+                            f"'{meta.name}' is a Base Model{size_txt}, not a training dataset.",
+                            [switch_opt, cancel_opt],
+                            default_choice=switch_opt,
+                        )
+                        if choice == switch_opt:
+                            state.lora_config.model = meta.path
+                            state.multi_lora_config.model = meta.path
+                            state.inspect_current_model(force=True)
+                            state.update_deterministic_lora_name()
+                            state.switch_mode(1)
+                            state.status_message = f"Base model set to: {meta.name}. Now select your training dataset below."
+                            state.status_is_error = False
+                    else:
+                        if not state.load_dataset(chosen):
+                            if state.last_missing_dependency:
+                                if show_missing_dependency_dialog(stdscr, state.last_missing_dependency):
+                                    state.load_dataset(chosen)
+                            else:
+                                show_error_dialog(stdscr, "Dataset Loading Failed", state.status_message)
             elif state.left_focus_idx == 1 and state.loaded_dataset and state.loaded_dataset.columns:
                 col_idx = state.selected_column_idx
                 if 0 <= col_idx < len(state.loaded_dataset.columns):
@@ -1283,17 +1306,37 @@ def _handle_mode2_input(
             if idx == 0:  # Base Model
                 chosen = show_model_picker_dialog(stdscr, state.lora_config.model)
                 if chosen:
-                    state.lora_config.model = chosen.strip()
-                    state.inspect_current_model()
+                    from mlx_commander.lora.model_info import normalize_model_path
+                    norm = normalize_model_path(chosen.strip())
+                    state.lora_config.model = norm
+                    meta = state.inspect_current_model(force=True)
+                    if meta.is_valid and meta.path:
+                        state.lora_config.model = meta.path
                     state.update_deterministic_lora_name()
+                    state.clear_estimates_cache()
                     state.status_message = f"Base model set to: {state.lora_config.model}"
                     state.status_is_error = False
             elif idx == 1:  # Dataset
                 chosen = show_dataset_picker_dialog(stdscr, state.lora_config.data)
                 if chosen:
-                    state.lora_config.data = chosen.strip()
-                    state.status_message = f"Dataset folder set to: {chosen.strip()}"
-                    state.status_is_error = False
+                    from mlx_commander.lora.model_info import is_model_directory
+                    chosen_p = Path(chosen.strip()).expanduser()
+                    if is_model_directory(chosen_p):
+                        show_error_dialog(
+                            stdscr,
+                            "Invalid Dataset Folder",
+                            [
+                                f"'{chosen_p.name}' is a Base Model directory (weights/config.json), not a training dataset.",
+                                "",
+                                "• To set this as your model, select 'Base Model' (Row 0) above.",
+                                "• Training datasets must contain 'train.jsonl' (or convert one in Mode 1).",
+                            ],
+                        )
+                    else:
+                        state.lora_config.data = chosen.strip()
+                        state.clear_estimates_cache()
+                        state.status_message = f"Dataset folder set to: {chosen.strip()}"
+                        state.status_is_error = False
             elif idx == 2:  # Method
                 chosen = show_choice_dialog(stdscr, "Fine-Tune Method", "Select technique:", FINE_TUNE_TYPES, state.lora_config.fine_tune_type)
                 if chosen:
@@ -1501,18 +1544,40 @@ def _handle_mode3_input(
             if idx == 0:  # Base Model
                 chosen = show_model_picker_dialog(stdscr, state.multi_lora_config.model)
                 if chosen:
-                    state.multi_lora_config.model = chosen.strip()
-                    state.lora_config.model = chosen.strip()
-                    state.inspect_current_model()
+                    from mlx_commander.lora.model_info import normalize_model_path
+                    norm = normalize_model_path(chosen.strip())
+                    state.multi_lora_config.model = norm
+                    state.lora_config.model = norm
+                    meta = state.inspect_current_model(force=True)
+                    if meta.is_valid and meta.path:
+                        state.multi_lora_config.model = meta.path
+                        state.lora_config.model = meta.path
+                    state.update_deterministic_lora_name()
+                    state.clear_estimates_cache()
                     state.status_message = f"Base model set to: {state.multi_lora_config.model}"
                     state.status_is_error = False
             elif idx == 1:  # Dataset
                 chosen = show_dataset_picker_dialog(stdscr, state.multi_lora_config.data)
                 if chosen:
-                    state.multi_lora_config.data = chosen.strip()
-                    state.lora_config.data = chosen.strip()
-                    state.status_message = f"Dataset folder set to: {chosen.strip()}"
-                    state.status_is_error = False
+                    from mlx_commander.lora.model_info import is_model_directory
+                    chosen_p = Path(chosen.strip()).expanduser()
+                    if is_model_directory(chosen_p):
+                        show_error_dialog(
+                            stdscr,
+                            "Invalid Dataset Folder",
+                            [
+                                f"'{chosen_p.name}' is a Base Model directory (weights/config.json), not a training dataset.",
+                                "",
+                                "• To set this as your model, select 'Base Model' (Row 0) above.",
+                                "• Training datasets must contain 'train.jsonl' (or convert one in Mode 1).",
+                            ],
+                        )
+                    else:
+                        state.multi_lora_config.data = chosen.strip()
+                        state.lora_config.data = chosen.strip()
+                        state.clear_estimates_cache()
+                        state.status_message = f"Dataset folder set to: {chosen.strip()}"
+                        state.status_is_error = False
             elif idx == 2:  # Method
                 chosen = show_choice_dialog(stdscr, "Fine-Tune Method", "Select technique:", FINE_TUNE_TYPES, state.multi_lora_config.fine_tune_type)
                 if chosen:

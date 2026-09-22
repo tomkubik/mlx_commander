@@ -1012,6 +1012,19 @@ def load_single_local_dataset(path: Union[Path, str]) -> LoadedDataset:
     is_split = False
 
     if file_path.is_file() or table_name is not None:
+        if file_path.name == "config.json":
+            from mlx_commander.lora.model_info import is_model_directory
+            if is_model_directory(file_path.parent):
+                raise ValueError(
+                    f"'{file_path.name}' is a model architecture configuration file inside '{file_path.parent.name}', not a training dataset. "
+                    f"To fine-tune this model, switch to Mode 2: Fine-Tuning Single Run (press F2 or Tab 2) and select '{file_path.parent.name}' under 'Base Model'."
+                )
+        if file_path.suffix.lower() in (".safetensors", ".bin", ".mlx", ".pt"):
+            raise ValueError(
+                f"'{file_path.name}' is a machine learning model weights file, not a training dataset. "
+                f"To fine-tune this model, switch to Mode 2: Fine-Tuning Single Run (press F2 or Tab 2) and select the model folder under 'Base Model'."
+            )
+
         ext = file_path.suffix.lower()
         full_ext = "".join(file_path.suffixes).lower()
 
@@ -1037,6 +1050,16 @@ def load_single_local_dataset(path: Union[Path, str]) -> LoadedDataset:
             raw_splits["default"] = load_from_json_or_jsonl(file_path)
 
     elif file_path.is_dir():
+        from mlx_commander.lora.model_info import is_model_directory, inspect_local_model
+        if is_model_directory(file_path):
+            meta = inspect_local_model(str(file_path))
+            size_str = f" ({meta.architecture}, {meta.file_size_gb:.1f} GB)" if meta.file_size_gb > 0 else ""
+            raise ValueError(
+                f"'{file_path.name}' is a machine learning base model directory{size_str}, not a training dataset. "
+                f"To fine-tune this model, switch to Mode 2: Fine-Tuning Single Run (press F2 or Tab 2) "
+                f"and select it under 'Base Model'. Datasets should contain training samples (e.g. .parquet, .jsonl, .csv, or train.jsonl)."
+            )
+
         if is_lance_dir(file_path):
             raw_splits["default"] = load_from_lance(file_path)
         else:

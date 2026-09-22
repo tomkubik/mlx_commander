@@ -206,10 +206,11 @@ def pick_file_gui(prompt: str = "Select Dataset File", default_dir: Optional[str
     return None
 
 
-def pick_model_gui(prompt: str = "Select Local Base Model (Folder or File)", default_dir: Optional[str] = None) -> Optional[str]:
+def pick_model_gui(prompt: str = "Select Local Base Model Folder (or any file inside it)", default_dir: Optional[str] = None) -> Optional[str]:
     """
     Unified GUI model picker.
     Allows selecting either a local model folder or a model weights/config file on drive.
+    Automatically normalizes to the containing model directory.
     Compiled dynamically at runtime.
     """
     if is_macos():
@@ -217,17 +218,21 @@ def pick_model_gui(prompt: str = "Select Local Base Model (Folder or File)", def
         if res is not None:
             # If multiple files selected, return the first
             first = res.splitlines()[0] if "\n" in res else res
-            return _clean_path(first)
+            cleaned = _clean_path(first)
+            if cleaned:
+                from mlx_commander.lora.model_info import normalize_model_path
+                return normalize_model_path(cleaned)
+            return None
 
         if not _compile_picker_at_runtime():
             dir_posix = str(Path(default_dir or os.getcwd()).resolve())
             script = f'''
             try
-                set thePath to choose file with prompt "{prompt}" default location (POSIX file "{dir_posix}")
+                set thePath to choose folder with prompt "{prompt}" default location (POSIX file "{dir_posix}")
                 return POSIX path of thePath
             on error
                 try
-                    set thePath to choose folder with prompt "{prompt}" default location (POSIX file "{dir_posix}")
+                    set thePath to choose file with prompt "{prompt}" default location (POSIX file "{dir_posix}")
                     return POSIX path of thePath
                 on error
                     return ""
@@ -238,7 +243,11 @@ def pick_model_gui(prompt: str = "Select Local Base Model (Folder or File)", def
                 sub_res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
                 if sub_res.returncode == 0:
                     out = sub_res.stdout.strip()
-                    return _clean_path(out) if out else None
+                    cleaned = _clean_path(out) if out else None
+                    if cleaned:
+                        from mlx_commander.lora.model_info import normalize_model_path
+                        return normalize_model_path(cleaned)
+                    return None
             except Exception:
                 pass
 

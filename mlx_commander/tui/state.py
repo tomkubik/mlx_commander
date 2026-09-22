@@ -250,6 +250,14 @@ class CommanderState:
         self._cached_dur_estimate = est
         return est
 
+    def clear_estimates_cache(self) -> None:
+        """Clear memory, duration, and train count estimate caches."""
+        self._cached_mem_key = None
+        self._cached_mem_estimate = None
+        self._cached_dur_key = None
+        self._cached_dur_estimate = None
+        self._cached_train_counts.clear()
+
     def get_multi_sweep_estimates(self) -> Dict[str, Any]:
         """Calculate aggregated runtime estimates for the multi-run sweep."""
         train_count = self.get_train_record_count()

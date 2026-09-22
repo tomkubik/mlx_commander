@@ -98,6 +98,85 @@ def _calculate_dir_weights_size_gb(dir_path: Path) -> float:
         return 0.0
 
 
+def is_model_directory(path: Any) -> bool:
+    """
+    Check if a path (file or directory) corresponds to a local model directory or weights file.
+    Returns True if it contains model configuration (config.json with model_type/architectures)
+    or model weight files (*.safetensors, *.bin, *.mlx, etc.).
+    """
+    if not path:
+        return False
+    try:
+        p = Path(path).expanduser().resolve()
+        if p.is_file():
+            if p.name == "config.json" or p.suffix.lower() in (".safetensors", ".bin", ".mlx", ".npz", ".pt"):
+                return True
+            p = p.parent
+        if not p.is_dir():
+            return False
+
+        # Check for weight files
+        patterns = ("*.safetensors", "*.bin", "*.mlx", "*.npz", "*.pt")
+        for pat in patterns:
+            if any(p.glob(pat)):
+                return True
+        if (p / "model.safetensors.index.json").exists() or (p / "pytorch_model.bin.index.json").exists():
+            return True
+
+        # Check config.json content
+        cfg = p / "config.json"
+        if cfg.is_file():
+            try:
+                with open(cfg, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                    if isinstance(d, dict) and ("model_type" in d or "architectures" in d):
+                        return True
+            except Exception:
+                pass
+
+        # Check Hugging Face hub snapshots structure
+        if (p / "snapshots").is_dir():
+            return True
+
+        return False
+    except Exception:
+        return False
+
+
+def normalize_model_path(path_str: Optional[str]) -> str:
+    """
+    Ensure model path resolves to the enclosing model directory.
+    If the user selected an individual file inside the model directory (e.g.
+    'model-00001-of-00004.safetensors', 'config.json', or 'tokenizer.json'),
+    this automatically resolves and returns the model folder path.
+    If pointing to a Hugging Face cache repo, resolves to the snapshot directory.
+    """
+    if not path_str or not str(path_str).strip():
+        return ""
+
+    clean = str(path_str).strip()
+    try:
+        p = Path(clean).expanduser().resolve()
+        if p.is_file():
+            # If user selected any file in a model directory, return the containing folder
+            if is_model_directory(p.parent) or p.suffix.lower() in (".safetensors", ".bin", ".mlx", ".pt", ".npz", ".json"):
+                return str(p.parent)
+            return str(p.parent)
+        elif p.is_dir():
+            # Check Hugging Face cache structure: models--<org>--<name>/snapshots/<hash>
+            snaps_dir = p / "snapshots"
+            if snaps_dir.is_dir():
+                snaps = sorted([s for s in snaps_dir.iterdir() if s.is_dir()], key=lambda x: x.stat().st_mtime, reverse=True)
+                for s in snaps:
+                    if (s / "config.json").is_file():
+                        return str(s)
+            return str(p)
+    except Exception:
+        pass
+
+    return clean
+
+
 def inspect_local_model(path_str: Optional[str]) -> ModelMetadata:
     """
     Inspect a local model saved on drive (directory or file).
@@ -113,7 +192,8 @@ def inspect_local_model(path_str: Optional[str]) -> ModelMetadata:
         )
 
     clean_path = path_str.strip()
-    p = Path(clean_path).expanduser().resolve()
+    norm_path = normalize_model_path(clean_path)
+    p = Path(norm_path).expanduser().resolve() if norm_path else Path(clean_path).expanduser().resolve()
 
     model_dir: Path
     config_file: Optional[Path] = None
