@@ -137,6 +137,17 @@ class TestCommanderUI(unittest.TestCase):
         show_help_dialog(self.mock_win)
         self.assertTrue(self.mock_win.refresh.called)
 
+    def test_show_help_dialog_displays_version(self):
+        """Verify the version number for mlx_commander is displayed at the top of the help dialog."""
+        from mlx_commander import __version__
+        self.mock_win.reset_mock()
+        self.mock_win.getmaxyx.return_value = (25, 80)
+        self.mock_win.getch.side_effect = [27]
+        show_help_dialog(self.mock_win)
+        calls = [c[0][2] for c in self.mock_win.addstr.call_args_list if len(c[0]) >= 3 and isinstance(c[0][2], str)]
+        all_text = " ".join(calls)
+        self.assertIn(f"v{__version__}", all_text, "Help dialog must display application version at the top")
+
     def test_show_results_dialog_esc(self):
         from pathlib import Path
         from mlx_commander.converter import ConversionResult

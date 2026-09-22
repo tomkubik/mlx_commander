@@ -119,12 +119,14 @@ class TestMultiRunStateAndUI(unittest.TestCase):
             is_focused=True,
             right_edge=75,
         )
-        # Verify safe_addstr called for label and values
+        # Verify safe_addstr called for label and values without brackets
         calls = win.addstr.call_args_list
         all_text = " ".join(c[0][2] for c in calls if len(c[0]) >= 3 and isinstance(c[0][2], str))
         self.assertIn("LoRA Rank", all_text)
-        self.assertIn("[ 2 ]", all_text)
-        self.assertIn("[ 8 ]", all_text)
+        self.assertIn(" 2 ", all_text)
+        self.assertIn(" 8 ", all_text)
+        self.assertNotIn("[ 2 ]", all_text)
+        self.assertNotIn("[ 8 ]", all_text)
 
     def test_draw_sweep_grid(self):
         win = MagicMock()
@@ -231,6 +233,60 @@ class TestMultiRunStateAndUI(unittest.TestCase):
         win.getch.side_effect = keys
         res = show_multi_value_edit_dialog(win, "Edit Run evals on test set (experimental)", "Enter eval conditions:", [False], val_type=bool)
         self.assertEqual(res, [True, False])
+
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_mode3_up_down_arrow_cross_pane_navigation(self, mock_curs, mock_colors, mock_has_colors):
+        """Verify seamless up and down arrow navigation between panes in Mode 3:
+        - Top of hyperparameter pane (0) + UP -> bottom row of selector pane (5)
+        - Bottom of selector pane (5) + DOWN -> top of hyperparameter pane (0)
+        - Bottom of hyperparameter pane (13) + DOWN -> sweep pane
+        - Sweep pane + UP -> bottom of hyperparameter pane (13)
+        - Sweep pane + DOWN -> top of selector pane (0)
+        """
+        win = MagicMock()
+        win.getmaxyx.return_value = (35, 120)
+        state = CommanderState()
+        state.active_tab = 2
+        state.multi_active_panel = "right"
+        state.multi_right_focus_idx = 0
+
+        # 1. At top of right pane (0), press UP -> should go to left pane, bottom row (5)
+        win.reset_mock()
+        win.getch.side_effect = [curses.KEY_UP, ord("q")]
+        run_commander_tui(win, initial_state=state)
+        self.assertEqual(state.multi_active_panel, "left")
+        self.assertEqual(state.multi_left_focus_idx, 5, "UP from top of hyperparameter pane must focus bottom row (5) of selector pane in Mode 3")
+
+        # 2. At bottom of left pane (5), press DOWN -> should go to right pane, top row (0)
+        win.reset_mock()
+        win.getch.side_effect = [curses.KEY_DOWN, ord("q")]
+        run_commander_tui(win, initial_state=state)
+        self.assertEqual(state.multi_active_panel, "right")
+        self.assertEqual(state.multi_right_focus_idx, 0, "DOWN from bottom of selector pane must focus top row (0) of hyperparameter pane in Mode 3")
+
+        # 3. At bottom of right pane (13), press DOWN -> should go to sweep pane
+        state.multi_right_focus_idx = 13
+        win.reset_mock()
+        win.getch.side_effect = [curses.KEY_DOWN, ord("q")]
+        run_commander_tui(win, initial_state=state)
+        self.assertEqual(state.multi_active_panel, "sweep", "DOWN from bottom of hyperparameter pane must focus sweep pane")
+
+        # 4. At sweep pane, press UP -> should go to right pane, bottom row (13)
+        win.reset_mock()
+        win.getch.side_effect = [curses.KEY_UP, ord("q")]
+        run_commander_tui(win, initial_state=state)
+        self.assertEqual(state.multi_active_panel, "right")
+        self.assertEqual(state.multi_right_focus_idx, 13, "UP from sweep pane must focus bottom row (13) of hyperparameter pane")
+
+        # 5. At sweep pane, press DOWN -> should wrap to left pane, top row (0)
+        state.multi_active_panel = "sweep"
+        win.reset_mock()
+        win.getch.side_effect = [curses.KEY_DOWN, ord("q")]
+        run_commander_tui(win, initial_state=state)
+        self.assertEqual(state.multi_active_panel, "left")
+        self.assertEqual(state.multi_left_focus_idx, 0, "DOWN from sweep pane must wrap to top row (0) of selector pane in Mode 3")
 
 
 if __name__ == "__main__":

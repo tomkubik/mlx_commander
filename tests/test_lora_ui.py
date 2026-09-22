@@ -460,6 +460,60 @@ class TestLoraUI(unittest.TestCase):
         self.assertTrue(state.lora_config.run_eval)
         self.assertIn("Run evals on test set (experimental): Yes", state.status_message)
 
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_mode2_up_down_arrow_cross_pane_navigation(self, mock_curs, mock_colors, mock_has_colors):
+        """Verify seamless up and down arrow navigation between panes in Mode 2:
+        - Top of hyperparameter pane (0) + UP -> bottom row of selector pane (5)
+        - Bottom of selector pane (5) + DOWN -> top of hyperparameter pane (0)
+        - Bottom of hyperparameter pane (14) + DOWN -> queue pane (0)
+        - Top of queue pane (0) + UP -> bottom of hyperparameter pane (14)
+        - Bottom of queue pane + DOWN -> top of selector pane (0)
+        """
+        state = CommanderState()
+        state.active_tab = 1
+        state.lora_active_panel = "right"
+        state.lora_right_focus_idx = 0
+
+        # 1. At top of right pane (0), press UP -> should go to left pane, bottom row (5)
+        self.mock_win.reset_mock()
+        self.mock_win.getch.side_effect = [curses.KEY_UP, ord("q")]
+        run_commander_tui(self.mock_win, initial_state=state)
+        self.assertEqual(state.lora_active_panel, "left")
+        self.assertEqual(state.lora_left_focus_idx, 5, "UP from top of hyperparameter pane must focus bottom row (5) of selector pane")
+
+        # 2. At bottom of left pane (5), press DOWN -> should go to right pane, top row (0)
+        self.mock_win.reset_mock()
+        self.mock_win.getch.side_effect = [curses.KEY_DOWN, ord("q")]
+        run_commander_tui(self.mock_win, initial_state=state)
+        self.assertEqual(state.lora_active_panel, "right")
+        self.assertEqual(state.lora_right_focus_idx, 0, "DOWN from bottom of selector pane must focus top row (0) of hyperparameter pane")
+
+        # 3. At bottom of right pane (14), press DOWN -> should go to queue pane (0)
+        state.lora_right_focus_idx = 14
+        self.mock_win.reset_mock()
+        self.mock_win.getch.side_effect = [curses.KEY_DOWN, ord("q")]
+        run_commander_tui(self.mock_win, initial_state=state)
+        self.assertEqual(state.lora_active_panel, "queue")
+        self.assertEqual(state.selected_queue_idx, 0, "DOWN from bottom of hyperparameter pane must focus queue pane")
+
+        # 4. At top of queue pane (0), press UP -> should go to right pane, bottom row (14)
+        self.mock_win.reset_mock()
+        self.mock_win.getch.side_effect = [curses.KEY_UP, ord("q")]
+        run_commander_tui(self.mock_win, initial_state=state)
+        self.assertEqual(state.lora_active_panel, "right")
+        self.assertEqual(state.lora_right_focus_idx, 14, "UP from top of queue pane must focus bottom row (14) of hyperparameter pane")
+
+        # 5. At queue pane (empty or bottom), press DOWN -> should wrap to left pane, top row (0)
+        state.lora_active_panel = "queue"
+        state.selected_queue_idx = 0
+        self.mock_win.reset_mock()
+        self.mock_win.getch.side_effect = [curses.KEY_DOWN, ord("q")]
+        run_commander_tui(self.mock_win, initial_state=state)
+        self.assertEqual(state.lora_active_panel, "left")
+        self.assertEqual(state.lora_left_focus_idx, 0, "DOWN from bottom of queue pane must wrap to top row (0) of selector pane")
+
 
 if __name__ == "__main__":
     unittest.main()

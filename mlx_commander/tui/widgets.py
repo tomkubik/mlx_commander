@@ -690,10 +690,10 @@ def draw_multi_field(
             disp = ("Yes" if v else "No") if "eval" in label.lower() else ("True" if v else "False")
         else:
             disp = str(v)
-        box_strs.append(f"[ {disp} ]")
+        box_strs.append(f" {disp} ")
 
     if not box_strs:
-        box_strs = ["[ <none> ]"]
+        box_strs = [" <none> "]
 
     total_w = sum(len(b) for b in box_strs) + (len(box_strs) - 1)
     if right_edge is not None:
@@ -1186,21 +1186,29 @@ def show_results_dialog(stdscr: curses.window, result: Any, *args: Any) -> None:
 
 def show_help_dialog(stdscr: curses.window) -> None:
     """Modal dialog displaying all keyboard shortcuts."""
+    from mlx_commander import __version__
+
     max_y, max_x = stdscr.getmaxyx()
     h = min(22, max_y - 2)
     w = min(74, max_x - 4)
     start_y = max(1, (max_y - h) // 2)
     start_x = max(1, (max_x - w) // 2)
 
+    title_str = f" MLX Commander v{__version__} — Keyboard Shortcuts "
+    if len(title_str) > w - 4:
+        title_str = f" MLX Commander v{__version__} "
+    if len(title_str) > w - 4:
+        title_str = f" v{__version__} "
+
     shortcuts = [
-        ("F2", "Switch Mode: Dataset Converter <-> Fine-Tuning Single Run"),
+        ("F2", "Cycle Modes: Converter -> Single-Run -> Multi-Run Sweep"),
         ("Tab / Shift-Tab", "Cycle focus between active screen panels"),
         ("↑ / ↓ (or k / j)", "Navigate vertically through fields, options, and queue"),
         ("← / → (or h / l)", "Navigate horizontally between columns"),
         ("Enter / Space", "Edit field, toggle value, or load queued run"),
         ("F3", "Open macOS Finder to choose output destination folder"),
-        ("F5", "Run conversion (Mode 1) or Execute Queue (Mode 2)"),
-        ("F6", "Add current configuration to LoRA Queue (Mode 2)"),
+        ("F5", "Run conversion (Mode 1) or Execute Queue (Mode 2 & 3)"),
+        ("F6", "Add current configuration to Queue (Mode 2 & 3)"),
         ("c", "Clone selected LoRA run in Queue (Mode 2)"),
         ("d", "Delete selected LoRA run from Queue (Mode 2)"),
         ("x", "Clear LoRA Queue (Mode 2)"),
@@ -1212,7 +1220,7 @@ def show_help_dialog(stdscr: curses.window) -> None:
 
     while True:
         safe_addstr(stdscr, start_y, start_x, "╔" + "═" * (w - 2) + "╗", get_color(2) | curses.A_BOLD)
-        safe_addstr(stdscr, start_y, start_x + 2, " MLX Commander Keyboard Shortcuts ", (get_color(4) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
+        safe_addstr(stdscr, start_y, start_x + 2, title_str, (get_color(4) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
         for r in range(1, h - 1):
             safe_addstr(stdscr, start_y + r, start_x, "║" + " " * (w - 2) + "║", get_color(2))
         safe_addstr(stdscr, start_y + h - 1, start_x, "╚" + "═" * (w - 2) + "╝", get_color(2) | curses.A_BOLD)

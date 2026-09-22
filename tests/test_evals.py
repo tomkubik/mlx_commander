@@ -259,12 +259,14 @@ class TestEvalUIControls(unittest.TestCase):
         win = MagicMock()
         win.getmaxyx.return_value = (24, 80)
         draw_multi_field(win, 0, 0, "Run evals on test set", [True, False], is_focused=True)
-        # Verify it drew [ Yes ] and [ No ]
+        # Verify it drew Yes and No without brackets
         calls = [c[0][2] for c in win.addstr.call_args_list if len(c[0]) >= 3 and isinstance(c[0][2], str)]
-        has_yes = any("[ Yes ]" in s for s in calls)
-        has_no = any("[ No ]" in s for s in calls)
+        has_yes = any(" Yes " in s for s in calls)
+        has_no = any(" No " in s for s in calls)
         self.assertTrue(has_yes)
         self.assertTrue(has_no)
+        self.assertFalse(any("[ Yes ]" in s for s in calls))
+        self.assertFalse(any("[ No ]" in s for s in calls))
 
 
 if __name__ == "__main__":

@@ -1250,7 +1250,11 @@ def _handle_mode2_input(
             else:
                 state.lora_left_focus_idx -= 1
         elif key in (curses.KEY_DOWN, ord("j")):
-            state.lora_left_focus_idx = min(5, state.lora_left_focus_idx + 1)
+            if state.lora_left_focus_idx < 5:
+                state.lora_left_focus_idx += 1
+            else:
+                state.lora_active_panel = "right"
+                state.lora_right_focus_idx = 0
         elif key in (curses.KEY_RIGHT, ord("l")):
             state.lora_active_panel = "right"
         elif key in (10, 13, curses.KEY_ENTER, 32):  # Enter or Space
@@ -1290,9 +1294,17 @@ def _handle_mode2_input(
     # Navigation in Right Panel (Hyperparameters)
     elif state.lora_active_panel == "right":
         if key in (curses.KEY_UP, ord("k")):
-            state.lora_right_focus_idx = max(0, state.lora_right_focus_idx - 1)
+            if state.lora_right_focus_idx > 0:
+                state.lora_right_focus_idx -= 1
+            else:
+                state.lora_active_panel = "left"
+                state.lora_left_focus_idx = 5
         elif key in (curses.KEY_DOWN, ord("j")):
-            state.lora_right_focus_idx = min(14, state.lora_right_focus_idx + 1)
+            if state.lora_right_focus_idx < 14:
+                state.lora_right_focus_idx += 1
+            else:
+                state.lora_active_panel = "queue"
+                state.selected_queue_idx = 0
         elif key in (curses.KEY_LEFT, ord("h")):
             state.lora_active_panel = "left"
         elif key in (10, 13, curses.KEY_ENTER, 32):  # Enter or Space
@@ -1381,9 +1393,15 @@ def _handle_mode2_input(
         if key in (curses.KEY_UP, ord("k")):
             if state.selected_queue_idx > 0:
                 state.selected_queue_idx -= 1
+            else:
+                state.lora_active_panel = "right"
+                state.lora_right_focus_idx = 14
         elif key in (curses.KEY_DOWN, ord("j")):
-            if state.selected_queue_idx < num_runs - 1:
+            if num_runs > 0 and state.selected_queue_idx < num_runs - 1:
                 state.selected_queue_idx += 1
+            else:
+                state.lora_active_panel = "left"
+                state.lora_left_focus_idx = 0
         elif key in (curses.KEY_HOME,):
             state.selected_queue_idx = 0
         elif key in (curses.KEY_END,):
@@ -1450,7 +1468,11 @@ def _handle_mode3_input(
             else:
                 state.multi_left_focus_idx -= 1
         elif key in (curses.KEY_DOWN, ord("j")):
-            state.multi_left_focus_idx = min(5, state.multi_left_focus_idx + 1)
+            if state.multi_left_focus_idx < 5:
+                state.multi_left_focus_idx += 1
+            else:
+                state.multi_active_panel = "right"
+                state.multi_right_focus_idx = 0
         elif key in (curses.KEY_RIGHT, ord("l")):
             state.multi_active_panel = "right"
         elif key in (10, 13, curses.KEY_ENTER, 32):  # Enter or Space
@@ -1490,9 +1512,16 @@ def _handle_mode3_input(
     # Navigation in Right Panel (Multi-Run Hyperparameters)
     elif state.multi_active_panel == "right":
         if key in (curses.KEY_UP, ord("k")):
-            state.multi_right_focus_idx = max(0, state.multi_right_focus_idx - 1)
+            if state.multi_right_focus_idx > 0:
+                state.multi_right_focus_idx -= 1
+            else:
+                state.multi_active_panel = "left"
+                state.multi_left_focus_idx = 5
         elif key in (curses.KEY_DOWN, ord("j")):
-            state.multi_right_focus_idx = min(13, state.multi_right_focus_idx + 1)
+            if state.multi_right_focus_idx < 13:
+                state.multi_right_focus_idx += 1
+            else:
+                state.multi_active_panel = "sweep"
         elif key in (curses.KEY_LEFT, ord("h")):
             state.multi_active_panel = "left"
         elif key in (10, 13, curses.KEY_ENTER, 32):  # Enter or Space
@@ -1520,8 +1549,10 @@ def _handle_mode3_input(
     elif state.multi_active_panel == "sweep":
         if key in (curses.KEY_UP, ord("k")):
             state.multi_active_panel = "right"
+            state.multi_right_focus_idx = 13
         elif key in (curses.KEY_DOWN, ord("j")):
-            pass
+            state.multi_active_panel = "left"
+            state.multi_left_focus_idx = 0
         elif key in (10, 13, curses.KEY_ENTER, 32):  # Add sweep to queue
             added = state.add_multi_lora_runs_to_queue()
             state.status_message = f"Added {len(added)} sweep run(s) to queue ({len(state.queue_manager.runs)} total queued)."
