@@ -8,6 +8,7 @@ model files (config.json, safetensors) saved on drive.
 import json
 import os
 import re
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -176,68 +177,251 @@ def normalize_model_path(path_str: Optional[str]) -> str:
     'model-00001-of-00004.safetensors', 'config.json', or 'tokenizer.json'),
     this automatically resolves and returns the model folder path.
     If pointing to a Hugging Face cache repo, resolves to the snapshot directory.
-    If a macOS path has a colon/slash mismatch (e.g. 'mlx-community:Llama-3.2-3B-Instruct'
-    when 'mlx-community/Llama-3.2-3B-Instruct' exists on disk, or vice versa), auto-heals it.
+    If the user selected a parent container folder, auto-discovers the model subfolder.
+    If a path has a colon/slash mismatch at any directory level (e.g. on macOS APFS
+    where slashes in Finder folder names are stored as colons on disk, or vice versa),
+    dynamically heals it across path segments.
     """
     if not path_str or not str(path_str).strip():
         return ""
 
-    clean = str(path_str).strip()
+    raw_val = str(path_str).strip()
+
+    # 1. Clean input variations (quotes, file:// scheme, trailing slashes, URL encoding)
+    def _clean_variants(s: str) -> List[str]:
+        variants = []
+        base = s.strip().strip("\"'\"")
+        if base.startswith("file://"):
+            base = base[7:]
+            if base.startswith("localhost/"):
+                base = base[9:]
+        if len(base) > 1 and base.endswith(("/", "\\")):
+            base = base.rstrip("/\\")
+        variants.append(base)
+
+        # Unquoted URL encoding (e.g. %20 -> space)
+        if "%" in base:
+            unquoted = urllib.parse.unquote(base)
+            if unquoted not in variants:
+                variants.append(unquoted)
+
+        # Unescaped shell backslash escapes (e.g. \ )
+        if "\\" in base and not (len(base) > 2 and base[1] == ":"):
+            unescaped = base.replace(r"\ ", " ").replace(r"\:", ":")
+            if unescaped not in variants:
+                variants.append(unescaped)
+
+        # Dash normalization (Unicode en-dash \u2013 and em-dash \u2014 to ASCII -)
+        for v in list(variants):
+            if "–" in v or "—" in v:
+                norm_dash = v.replace("–", "-").replace("—", "-")
+                if norm_dash not in variants:
+                    variants.append(norm_dash)
+
+        return variants
 
     def _resolve_candidate(cand_path: Path) -> Optional[str]:
         try:
             if not cand_path.exists():
                 return None
-            if cand_path.is_file():
-                if is_model_directory(cand_path.parent) or cand_path.suffix.lower() in (".safetensors", ".bin", ".mlx", ".pt", ".npz", ".json"):
-                    return str(cand_path.parent)
-                return str(cand_path.parent)
-            elif cand_path.is_dir():
-                snaps_dir = cand_path / "snapshots"
+            cand_res = cand_path.resolve()
+            if cand_res.is_file():
+                if is_model_directory(cand_res.parent) or cand_res.suffix.lower() in (
+                    ".safetensors", ".bin", ".mlx", ".pt", ".npz", ".json"
+                ):
+                    return str(cand_res.parent.resolve())
+                return str(cand_res.parent.resolve())
+            elif cand_res.is_dir():
+                # Check HF hub snapshots
+                snaps_dir = cand_res / "snapshots"
                 if snaps_dir.is_dir():
-                    snaps = sorted([s for s in snaps_dir.iterdir() if s.is_dir()], key=lambda x: x.stat().st_mtime, reverse=True)
+                    snaps = sorted(
+                        [s for s in snaps_dir.iterdir() if s.is_dir()],
+                        key=lambda x: x.stat().st_mtime,
+                        reverse=True,
+                    )
                     for s in snaps:
                         if (s / "config.json").is_file():
-                            return str(s)
-                return str(cand_path)
+                            return str(s.resolve())
+
+                if is_model_directory(cand_res):
+                    return str(cand_res.resolve())
+
+                # Auto-dive into immediate children if user selected parent container
+                try:
+                    children = list(cand_res.iterdir())
+                    model_subdirs = [c for c in children if c.is_dir() and is_model_directory(c)]
+                    if len(model_subdirs) == 1:
+                        return str(model_subdirs[0].resolve())
+                    elif len(model_subdirs) > 1:
+                        # Prioritize child with hyphen or model indicators
+                        hyphen_subs = [c for c in model_subdirs if "-" in c.name]
+                        if hyphen_subs:
+                            return str(hyphen_subs[0].resolve())
+                        return str(model_subdirs[0].resolve())
+
+                    # Check 2 levels deep (e.g. Models/org/model-name)
+                    for c in children:
+                        if c.is_dir():
+                            deep_subs = [d for d in c.iterdir() if d.is_dir() and is_model_directory(d)]
+                            if len(deep_subs) == 1:
+                                return str(deep_subs[0].resolve())
+                            elif len(deep_subs) > 1:
+                                hyphen_deep = [d for d in deep_subs if "-" in d.name]
+                                if hyphen_deep:
+                                    return str(hyphen_deep[0].resolve())
+                                return str(deep_subs[0].resolve())
+                except Exception:
+                    pass
+
+                return str(cand_res.resolve())
         except Exception:
             pass
         return None
 
-    try:
-        p = Path(clean).expanduser().resolve()
-        resolved = _resolve_candidate(p)
-        if resolved:
-            return resolved
+    def _heal_path_segments(target_path: str) -> Optional[str]:
+        try:
+            target = Path(target_path).expanduser()
+            parts = list(target.parts)
+            if not parts:
+                return None
 
-        # Heuristic 1: Colon to slash
-        # (e.g. /path/to/mlx-community:Llama -> /path/to/mlx-community/Llama)
-        if ":" in clean:
-            if len(clean) > 1 and clean[1] == ":" and clean[0].isalpha():
-                drive_prefix = clean[:2]
-                rest = clean[2:].replace(":", "/")
-                alt_clean = drive_prefix + rest
-            else:
-                alt_clean = clean.replace(":", "/")
-            cand = Path(alt_clean).expanduser().resolve()
-            resolved = _resolve_candidate(cand)
+            # Find deepest existing ancestor root
+            idx = len(parts)
+            while idx > 0:
+                cand = Path(*parts[:idx])
+                if cand.exists():
+                    break
+                idx -= 1
+
+            if idx == 0:
+                return None
+
+            current = Path(*parts[:idx])
+            remaining = parts[idx:]
+
+            def match_sub(curr_dir: Path, rem_parts: List[str]) -> Optional[Path]:
+                if not rem_parts:
+                    return curr_dir
+                if not curr_dir.is_dir():
+                    return None
+
+                try:
+                    entries = list(curr_dir.iterdir())
+                except Exception:
+                    return None
+
+                def norm_name(name: str) -> str:
+                    return name.replace("–", "-").replace("—", "-")
+
+                p0 = rem_parts[0]
+                p0_norm = norm_name(p0)
+
+                # 1. Direct match for rem_parts[0]
+                for e in entries:
+                    if e.name == p0 or norm_name(e.name) == p0_norm:
+                        res = match_sub(e, rem_parts[1:])
+                        if res:
+                            return res
+
+                # 2. Multi-part colon join: e.g. rem_parts[0]:rem_parts[1]
+                for k in range(2, len(rem_parts) + 1):
+                    combined = ":".join(rem_parts[:k])
+                    comb_norm = norm_name(combined)
+                    for e in entries:
+                        if e.name == combined or norm_name(e.name) == comb_norm:
+                            res = match_sub(e, rem_parts[k:])
+                            if res:
+                                return res
+
+                # 3. If rem_parts[0] has colons, split and try nested match
+                if ":" in p0:
+                    sub_parts = [p for p in p0.split(":") if p] + list(rem_parts[1:])
+                    res = match_sub(curr_dir, sub_parts)
+                    if res:
+                        return res
+
+                # 4. If remaining parts is a parent prefix (e.g. user selected mlx-community)
+                # Look for directory entries starting with prefix + ":"
+                if len(rem_parts) == 1:
+                    prefix_colon = p0 + ":"
+                    prefix_colon_lower = p0.lower() + ":"
+                    for e in entries:
+                        if e.name.startswith(prefix_colon) or e.name.lower().startswith(prefix_colon_lower):
+                            return e
+
+                # 5. Case-insensitive matching fallback
+                for e in entries:
+                    if e.name.lower() == p0.lower() or norm_name(e.name).lower() == p0_norm.lower():
+                        res = match_sub(e, rem_parts[1:])
+                        if res:
+                            return res
+
+                return None
+
+            matched = match_sub(current, remaining)
+            if matched and matched.exists():
+                return _resolve_candidate(matched)
+        except Exception:
+            pass
+        return None
+
+    variants = _clean_variants(raw_val)
+
+    # Pass 1: Direct resolution of variants
+    for v in variants:
+        try:
+            p = Path(v).expanduser().resolve()
+            resolved = _resolve_candidate(p)
             if resolved:
                 return resolved
+        except Exception:
+            pass
 
-        # Heuristic 2: Slash to colon in last segment
-        # (e.g. /path/to/mlx-community/Llama where on disk it was created as a single folder 'mlx-community:Llama')
-        if "/" in clean:
-            parent_p = p.parent
-            if parent_p.parent.exists():
-                colon_name = f"{parent_p.name}:{p.name}"
-                cand = parent_p.parent / colon_name
+    # Pass 2: Deepest-ancestor colon/slash healing
+    for v in variants:
+        healed = _heal_path_segments(v)
+        if healed:
+            return healed
+
+    # Pass 3: Global colon-to-slash replacement
+    for v in variants:
+        if ":" in v:
+            if len(v) > 1 and v[1] == ":" and v[0].isalpha():
+                drive_prefix = v[:2]
+                rest = v[2:].replace(":", "/")
+                alt_clean = drive_prefix + rest
+            else:
+                alt_clean = v.replace(":", "/")
+            try:
+                cand = Path(alt_clean).expanduser().resolve()
                 resolved = _resolve_candidate(cand)
                 if resolved:
                     return resolved
-    except Exception:
-        pass
+                healed = _heal_path_segments(alt_clean)
+                if healed:
+                    return healed
+            except Exception:
+                pass
 
-    return clean
+    # Pass 4: Check relative to standard local model locations if relative
+    if not is_local_path(variants[0]):
+        for loc in (Path.cwd(), Path.home() / "Models", Path.home() / "Downloads"):
+            for v in variants:
+                loc_cand = loc / v
+                try:
+                    if loc_cand.exists():
+                        res = _resolve_candidate(loc_cand)
+                        if res:
+                            return res
+                    healed = _heal_path_segments(str(loc_cand))
+                    if healed:
+                        return healed
+                except Exception:
+                    pass
+
+    return variants[0]
+
 
 
 def inspect_local_model(path_str: Optional[str]) -> ModelMetadata:

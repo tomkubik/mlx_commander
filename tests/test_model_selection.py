@@ -231,6 +231,96 @@ class TestModelSelection(unittest.TestCase):
         yaml_content = (mgr.configs_dir / f"{run.id}.yaml").read_text()
         self.assertIn(str(model_dir.resolve()), yaml_content)
 
+    def test_normalize_model_path_heals_ancestor_colon_folder_with_subfolder_hyphen(self):
+        # On disk: Models/foo:bar/sub-hyphen
+        model_dir = self.base / "Models" / "foo:bar" / "sub-hyphen"
+        model_dir.mkdir(parents=True)
+        (model_dir / "config.json").write_text('{"model_type": "llama"}')
+
+        # Input with forward slashes for the colon folder
+        slash_input = str(self.base / "Models" / "foo" / "bar" / "sub-hyphen")
+        healed = normalize_model_path(slash_input)
+        self.assertEqual(healed, str(model_dir.resolve()))
+
+    def test_normalize_model_path_heals_ancestor_colon_folder_from_file(self):
+        # On disk: Models/foo:bar/sub-hyphen/config.json
+        model_dir = self.base / "Models" / "foo:bar" / "sub-hyphen"
+        model_dir.mkdir(parents=True)
+        cfg_file = model_dir / "config.json"
+        cfg_file.write_text('{"model_type": "llama"}')
+
+        # Input pointing at config.json using slashes
+        slash_file = str(self.base / "Models" / "foo" / "bar" / "sub-hyphen" / "config.json")
+        healed = normalize_model_path(slash_file)
+        self.assertEqual(healed, str(model_dir.resolve()))
+
+    def test_normalize_model_path_auto_discovers_child_model_from_parent_folder(self):
+        # On disk: Models/mlx-community/Llama-3.2-3B-Instruct
+        model_dir = self.base / "Models" / "mlx-community" / "Llama-3.2-3B-Instruct"
+        model_dir.mkdir(parents=True)
+        (model_dir / "config.json").write_text('{"model_type": "llama"}')
+
+        # User selected parent container folder "mlx-community"
+        parent_input = str(self.base / "Models" / "mlx-community")
+        healed = normalize_model_path(parent_input)
+        self.assertEqual(healed, str(model_dir.resolve()))
+
+        # With trailing slash
+        healed_slash = normalize_model_path(parent_input + "/")
+        self.assertEqual(healed_slash, str(model_dir.resolve()))
+
+    def test_normalize_model_path_heals_parent_prefix_to_colon_folder(self):
+        # On disk: Models/mlx-community:Llama-3.2-3B-Instruct
+        model_dir = self.base / "Models" / "mlx-community:Llama-3.2-3B-Instruct"
+        model_dir.mkdir(parents=True)
+        (model_dir / "config.json").write_text('{"model_type": "llama"}')
+
+        # User selected prefix "mlx-community"
+        prefix_input = str(self.base / "Models" / "mlx-community")
+        healed = normalize_model_path(prefix_input)
+        self.assertEqual(healed, str(model_dir.resolve()))
+
+    def test_normalize_model_path_heals_file_in_colon_folder(self):
+        # On disk: Models/mlx-community:Llama-3.2-3B-Instruct/config.json
+        model_dir = self.base / "Models" / "mlx-community:Llama-3.2-3B-Instruct"
+        model_dir.mkdir(parents=True)
+        (model_dir / "config.json").write_text('{"model_type": "llama"}')
+
+        # Input pointing at config.json inside the slash-represented path
+        slash_cfg = str(self.base / "Models" / "mlx-community" / "Llama-3.2-3B-Instruct" / "config.json")
+        healed = normalize_model_path(slash_cfg)
+        self.assertEqual(healed, str(model_dir.resolve()))
+
+    def test_normalize_model_path_sanitizes_quotes_file_url_and_escapes(self):
+        model_dir = self.base / "Models" / "Model Tuning" / "Llama-3.2-3B"
+        model_dir.mkdir(parents=True)
+        (model_dir / "config.json").write_text('{"model_type": "llama"}')
+
+        expected = str(model_dir.resolve())
+
+        # Surrounding quotes
+        self.assertEqual(normalize_model_path(f'"{expected}"'), expected)
+        self.assertEqual(normalize_model_path(f"'{expected}'"), expected)
+
+        # file:// scheme
+        self.assertEqual(normalize_model_path(f"file://{expected}"), expected)
+
+        # URL-encoded space (%20)
+        url_encoded = str(self.base / "Models" / "Model%20Tuning" / "Llama-3.2-3B")
+        self.assertEqual(normalize_model_path(url_encoded), expected)
+
+        # Shell backslash-escaped space
+        escaped_space = str(self.base / "Models" / "Model\\ Tuning" / "Llama-3.2-3B")
+        self.assertEqual(normalize_model_path(escaped_space), expected)
+
+        # Unicode en-dash (\u2013) vs hyphen
+        dash_model = self.base / "Models" / "Llama–3.2–3B"
+        dash_model.mkdir(parents=True)
+        (dash_model / "config.json").write_text('{"model_type": "llama"}')
+        ascii_input = str(self.base / "Models" / "Llama-3.2-3B")
+        self.assertEqual(normalize_model_path(ascii_input), str(dash_model.resolve()))
+
 
 if __name__ == "__main__":
+
     unittest.main()
