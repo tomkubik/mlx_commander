@@ -107,6 +107,130 @@ class TestModelSelection(unittest.TestCase):
         self.assertIn("model weights file", str(ctx.exception).lower())
         self.assertIn("mode 2", str(ctx.exception).lower())
 
+    def test_is_local_path(self):
+        from mlx_commander.lora.model_info import is_local_path
+
+        self.assertFalse(is_local_path("mlx-community/Llama-3.2-3B-Instruct-4bit"))
+        self.assertFalse(is_local_path("meta-llama/Llama-3.2-1B-Instruct"))
+        self.assertTrue(is_local_path("/Users/tomkubik/Models/Llama"))
+        self.assertTrue(is_local_path("./models/Llama"))
+        self.assertTrue(is_local_path("~/models/Llama"))
+        self.assertTrue(is_local_path("/path/with/mlx-community:Llama-3.2-3B-Instruct"))
+
+    def test_normalize_model_path_heals_colon_to_slash(self):
+        # On disk: Models/mlx-community/Llama-3.2-3B-Instruct
+        model_dir = self.base / "Models" / "mlx-community" / "Llama-3.2-3B-Instruct"
+        model_dir.mkdir(parents=True)
+        (model_dir / "config.json").write_text('{"model_type": "llama"}')
+
+        # Input: Models/mlx-community:Llama-3.2-3B-Instruct (colon in folder name)
+        colon_input = str(self.base / "Models" / "mlx-community:Llama-3.2-3B-Instruct")
+        healed = normalize_model_path(colon_input)
+        self.assertEqual(healed, str(model_dir.resolve()))
+
+    def test_normalize_model_path_heals_slash_to_colon(self):
+        # On disk: Models/mlx-community:Llama-3.2-3B-Instruct (colon in folder name on disk)
+        model_dir = self.base / "Models" / "mlx-community:Llama-3.2-3B-Instruct"
+        model_dir.mkdir(parents=True)
+        (model_dir / "config.json").write_text('{"model_type": "llama"}')
+
+        # Input: Models/mlx-community/Llama-3.2-3B-Instruct (slash entered)
+        slash_input = str(self.base / "Models" / "mlx-community" / "Llama-3.2-3B-Instruct")
+        healed = normalize_model_path(slash_input)
+        self.assertEqual(healed, str(model_dir.resolve()))
+
+    def test_execute_single_run_preflight_blocks_nonexistent_local_model(self):
+        from mlx_commander.lora.config import LoraRunConfig
+        from mlx_commander.lora.queue import QueueManager
+        from mlx_commander.lora.runner import execute_single_run
+
+        q_dir = self.base / "queue"
+        mgr = QueueManager(q_dir)
+
+        # Dataset with train.jsonl
+        ds_dir = self.base / "dataset"
+        ds_dir.mkdir()
+        (ds_dir / "train.jsonl").write_text('{"prompt": "q", "completion": "a"}\n')
+
+        # Run with nonexistent local model path
+        bad_model_path = str(self.base / "NonExistentModel")
+        cfg = LoraRunConfig(model=bad_model_path, data=str(ds_dir), iters=10)
+        run = mgr.add_run(cfg)
+
+        code = execute_single_run(mgr, run.id, enable_wandb=False)
+        self.assertEqual(code, 1)
+
+        # Status updated to failed with clear error message
+        updated_r = mgr.get_run(run.id)
+        self.assertEqual(updated_r.status, "failed")
+        self.assertIn("not found on disk", updated_r.error_message.lower())
+
+    def test_execute_single_run_preflight_blocks_missing_train_data(self):
+        from mlx_commander.lora.config import LoraRunConfig
+        from mlx_commander.lora.queue import QueueManager
+        from mlx_commander.lora.runner import execute_single_run
+
+        q_dir = self.base / "queue"
+        mgr = QueueManager(q_dir)
+
+        # Valid model
+        model_dir = self.base / "ValidModel"
+        model_dir.mkdir()
+        (model_dir / "config.json").write_text('{"model_type": "llama"}')
+
+        # Dataset folder missing train.jsonl
+        empty_ds = self.base / "empty_dataset"
+        empty_ds.mkdir()
+
+        cfg = LoraRunConfig(model=str(model_dir), data=str(empty_ds), iters=10)
+        run = mgr.add_run(cfg)
+
+        code = execute_single_run(mgr, run.id, enable_wandb=False)
+        self.assertEqual(code, 1)
+
+        updated_r = mgr.get_run(run.id)
+        self.assertEqual(updated_r.status, "failed")
+        self.assertIn("train.jsonl", updated_r.error_message.lower())
+
+    def test_execute_single_run_auto_heals_colon_model_path(self):
+        from unittest.mock import patch, MagicMock
+        from mlx_commander.lora.config import LoraRunConfig
+        from mlx_commander.lora.queue import QueueManager
+        from mlx_commander.lora.runner import execute_single_run
+
+        q_dir = self.base / "queue"
+        mgr = QueueManager(q_dir)
+
+        # Real model on disk: Models/mlx-community/Llama-3.2-3B
+        model_dir = self.base / "Models" / "mlx-community" / "Llama-3.2-3B"
+        model_dir.mkdir(parents=True)
+        (model_dir / "config.json").write_text('{"model_type": "llama"}')
+
+        # Valid dataset
+        ds_dir = self.base / "dataset"
+        ds_dir.mkdir()
+        (ds_dir / "train.jsonl").write_text('{"prompt": "q", "completion": "a"}\n')
+
+        # Run configured with colon in path
+        colon_model = str(self.base / "Models" / "mlx-community:Llama-3.2-3B")
+        cfg = LoraRunConfig(model=colon_model, data=str(ds_dir), iters=10)
+        run = mgr.add_run(cfg)
+
+        # Mock subprocess.Popen so we don't actually run mlx_lm
+        mock_proc = MagicMock()
+        mock_proc.stdout.readline.return_value = ""
+        mock_proc.wait.return_value = 0
+
+        with patch("subprocess.Popen", return_value=mock_proc):
+            code = execute_single_run(mgr, run.id, enable_wandb=False)
+            self.assertEqual(code, 0)
+
+        # Model path was auto-healed in run and YAML config
+        updated_r = mgr.get_run(run.id)
+        self.assertEqual(updated_r.model, str(model_dir.resolve()))
+        yaml_content = (mgr.configs_dir / f"{run.id}.yaml").read_text()
+        self.assertIn(str(model_dir.resolve()), yaml_content)
+
 
 if __name__ == "__main__":
     unittest.main()

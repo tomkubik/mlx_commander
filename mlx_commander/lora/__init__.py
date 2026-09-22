@@ -24,6 +24,7 @@ from .estimator import (
 from .model_info import (
     ModelMetadata,
     inspect_local_model,
+    is_local_path,
     is_model_directory,
     normalize_model_path,
     scan_local_models,
@@ -63,6 +64,7 @@ __all__ = [
     "parse_mlx_log_line",
     "ModelMetadata",
     "inspect_local_model",
+    "is_local_path",
     "is_model_directory",
     "normalize_model_path",
     "scan_local_models",

@@ -143,6 +143,32 @@ def is_model_directory(path: Any) -> bool:
         return False
 
 
+def is_local_path(path_str: Optional[str]) -> bool:
+    """
+    Determine if a model string looks like a local filesystem path rather than a Hugging Face Hub ID.
+    HF Hub IDs are in the format 'org/model' without leading slash, tilde, Windows drive letters,
+    or filesystem path separators.
+    """
+    if not path_str or not str(path_str).strip():
+        return False
+    s = str(path_str).strip()
+    if s.startswith(("/", "./", "../", "~")):
+        return True
+    if "\\" in s:
+        return True
+    if len(s) > 1 and s[1] == ":" and s[0].isalpha():  # Windows drive letter e.g. C:\
+        return True
+    if ":" in s and "/" in s:  # macOS POSIX path containing colon from Finder
+        return True
+    try:
+        p = Path(s).expanduser().resolve()
+        if p.exists():
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def normalize_model_path(path_str: Optional[str]) -> str:
     """
     Ensure model path resolves to the enclosing model directory.
@@ -150,27 +176,64 @@ def normalize_model_path(path_str: Optional[str]) -> str:
     'model-00001-of-00004.safetensors', 'config.json', or 'tokenizer.json'),
     this automatically resolves and returns the model folder path.
     If pointing to a Hugging Face cache repo, resolves to the snapshot directory.
+    If a macOS path has a colon/slash mismatch (e.g. 'mlx-community:Llama-3.2-3B-Instruct'
+    when 'mlx-community/Llama-3.2-3B-Instruct' exists on disk, or vice versa), auto-heals it.
     """
     if not path_str or not str(path_str).strip():
         return ""
 
     clean = str(path_str).strip()
+
+    def _resolve_candidate(cand_path: Path) -> Optional[str]:
+        try:
+            if not cand_path.exists():
+                return None
+            if cand_path.is_file():
+                if is_model_directory(cand_path.parent) or cand_path.suffix.lower() in (".safetensors", ".bin", ".mlx", ".pt", ".npz", ".json"):
+                    return str(cand_path.parent)
+                return str(cand_path.parent)
+            elif cand_path.is_dir():
+                snaps_dir = cand_path / "snapshots"
+                if snaps_dir.is_dir():
+                    snaps = sorted([s for s in snaps_dir.iterdir() if s.is_dir()], key=lambda x: x.stat().st_mtime, reverse=True)
+                    for s in snaps:
+                        if (s / "config.json").is_file():
+                            return str(s)
+                return str(cand_path)
+        except Exception:
+            pass
+        return None
+
     try:
         p = Path(clean).expanduser().resolve()
-        if p.is_file():
-            # If user selected any file in a model directory, return the containing folder
-            if is_model_directory(p.parent) or p.suffix.lower() in (".safetensors", ".bin", ".mlx", ".pt", ".npz", ".json"):
-                return str(p.parent)
-            return str(p.parent)
-        elif p.is_dir():
-            # Check Hugging Face cache structure: models--<org>--<name>/snapshots/<hash>
-            snaps_dir = p / "snapshots"
-            if snaps_dir.is_dir():
-                snaps = sorted([s for s in snaps_dir.iterdir() if s.is_dir()], key=lambda x: x.stat().st_mtime, reverse=True)
-                for s in snaps:
-                    if (s / "config.json").is_file():
-                        return str(s)
-            return str(p)
+        resolved = _resolve_candidate(p)
+        if resolved:
+            return resolved
+
+        # Heuristic 1: Colon to slash
+        # (e.g. /path/to/mlx-community:Llama -> /path/to/mlx-community/Llama)
+        if ":" in clean:
+            if len(clean) > 1 and clean[1] == ":" and clean[0].isalpha():
+                drive_prefix = clean[:2]
+                rest = clean[2:].replace(":", "/")
+                alt_clean = drive_prefix + rest
+            else:
+                alt_clean = clean.replace(":", "/")
+            cand = Path(alt_clean).expanduser().resolve()
+            resolved = _resolve_candidate(cand)
+            if resolved:
+                return resolved
+
+        # Heuristic 2: Slash to colon in last segment
+        # (e.g. /path/to/mlx-community/Llama where on disk it was created as a single folder 'mlx-community:Llama')
+        if "/" in clean:
+            parent_p = p.parent
+            if parent_p.parent.exists():
+                colon_name = f"{parent_p.name}:{p.name}"
+                cand = parent_p.parent / colon_name
+                resolved = _resolve_candidate(cand)
+                if resolved:
+                    return resolved
     except Exception:
         pass
 

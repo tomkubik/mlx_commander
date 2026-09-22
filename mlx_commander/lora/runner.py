@@ -141,6 +141,58 @@ def execute_single_run(
     cfg_file = mgr.configs_dir / f"{r.id}.yaml"
     log_file = mgr.logs_dir / f"{r.id}.log"
 
+    from .model_info import is_local_path, is_model_directory, normalize_model_path
+
+    # Pre-flight Validation: Model Path
+    healed_model = normalize_model_path(r.model)
+    if is_local_path(r.model) or is_local_path(healed_model):
+        if healed_model != r.model and Path(healed_model).exists():
+            print(f"  [Model Path] Auto-healed: '{r.model}' -> '{healed_model}'")
+            r.model = healed_model
+            mgr.save()
+
+        model_p = Path(r.model).expanduser().resolve()
+        if not model_p.exists():
+            err_msg = (
+                f"Local model path not found on disk: '{r.model}'.\n"
+                f"Please verify the directory exists and is accessible."
+            )
+            sys.stderr.write(f"\n[ERROR] {err_msg}\n")
+            with open(log_file, "w", encoding="utf-8") as lf:
+                lf.write(f"=== MLX Commander LoRA Run: {r.name} ===\n\n[ERROR] {err_msg}\n")
+            mgr.update_run_status(run_id, "failed", exit_code=1, error_message=err_msg)
+            return 1
+
+        if not is_model_directory(model_p):
+            err_msg = (
+                f"Directory '{r.model}' is not a valid model directory "
+                f"(missing config.json or model weights .safetensors files)."
+            )
+            sys.stderr.write(f"\n[ERROR] {err_msg}\n")
+            with open(log_file, "w", encoding="utf-8") as lf:
+                lf.write(f"=== MLX Commander LoRA Run: {r.name} ===\n\n[ERROR] {err_msg}\n")
+            mgr.update_run_status(run_id, "failed", exit_code=1, error_message=err_msg)
+            return 1
+
+    # Pre-flight Validation: Data Path
+    data_p = Path(r.data).expanduser().resolve()
+    if not data_p.exists():
+        err_msg = f"Dataset path not found on disk: '{r.data}'. Please verify the directory exists."
+        sys.stderr.write(f"\n[ERROR] {err_msg}\n")
+        with open(log_file, "w", encoding="utf-8") as lf:
+            lf.write(f"=== MLX Commander LoRA Run: {r.name} ===\n\n[ERROR] {err_msg}\n")
+        mgr.update_run_status(run_id, "failed", exit_code=1, error_message=err_msg)
+        return 1
+
+    train_file = data_p / "train.jsonl" if data_p.is_dir() else data_p
+    if not train_file.exists():
+        err_msg = f"Training data file 'train.jsonl' not found in '{r.data}'."
+        sys.stderr.write(f"\n[ERROR] {err_msg}\n")
+        with open(log_file, "w", encoding="utf-8") as lf:
+            lf.write(f"=== MLX Commander LoRA Run: {r.name} ===\n\n[ERROR] {err_msg}\n")
+        mgr.update_run_status(run_id, "failed", exit_code=1, error_message=err_msg)
+        return 1
+
     # Initialize Weights & Biases tracking if enabled and authenticated
     tracker = WandbTracker(project=wandb_project or r.wandb_project, enabled=enable_wandb)
     tracker.start_run(r)
@@ -155,27 +207,24 @@ def execute_single_run(
         print(f"  W&B Run:    {tracker.run_url}")
     print("-" * 60)
 
-    cmd = [sys.executable, "-m", "mlx_lm.lora", "--config", str(cfg_file)]
+    cmd = [sys.executable, "-m", "mlx_lm", "lora", "--config", str(cfg_file)]
 
     with open(log_file, "w", encoding="utf-8") as lf:
         lf.write(f"=== MLX Commander LoRA Run: {r.name} ===\n")
         lf.write(f"Command: {' '.join(cmd)}\n\n")
         lf.flush()
 
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
+        def _stream_proc(proc: subprocess.Popen) -> int:
             for line in iter(proc.stdout.readline, ""):
                 sys.stdout.write(line)
                 sys.stdout.flush()
                 lf.write(line)
                 lf.flush()
                 tracker.log_line(line)
+                if "hfvalidationerror" in line.lower() or "repo id must be in the form" in line.lower():
+                    hint = f"\n  [MLX Commander Hint] mlx_lm could not find model '{r.model}' on disk and attempted to download it from Hugging Face Hub.\n"
+                    sys.stdout.write(hint)
+                    lf.write(hint)
                 if "save" in line.lower() or "saved" in line.lower() or "iter" in line.lower():
                     try:
                         new_renamed = rename_saved_adapters(r.adapter_path, r)
@@ -188,37 +237,47 @@ def execute_single_run(
                     except Exception:
                         pass
             proc.stdout.close()
-            code = proc.wait()
+            return proc.wait()
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            code = _stream_proc(proc)
         except FileNotFoundError:
             try:
+                # Fallback: python -m mlx_lm.lora
+                cmd_alt = [sys.executable, "-m", "mlx_lm.lora", "--config", str(cfg_file)]
                 proc = subprocess.Popen(
-                    ["mlx_lm.lora", "--config", str(cfg_file)],
+                    cmd_alt,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
                     bufsize=1,
                 )
-                for line in iter(proc.stdout.readline, ""):
-                    sys.stdout.write(line)
-                    sys.stdout.flush()
-                    lf.write(line)
-                    lf.flush()
-                    tracker.log_line(line)
-                    if "save" in line.lower() or "saved" in line.lower() or "iter" in line.lower():
-                        try:
-                            new_renamed = rename_saved_adapters(r.adapter_path, r)
-                            for orig, dest in new_renamed:
-                                msg = f"  [Adapter Checkpoint] Saved: {dest.name}\n"
-                                sys.stdout.write(msg)
-                                sys.stdout.flush()
-                                lf.write(msg)
-                                lf.flush()
-                        except Exception:
-                            pass
-                proc.stdout.close()
-                code = proc.wait()
+                code = _stream_proc(proc)
+            except FileNotFoundError:
+                try:
+                    # Fallback: standalone mlx_lm.lora binary
+                    proc = subprocess.Popen(
+                        ["mlx_lm.lora", "--config", str(cfg_file)],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                    )
+                    code = _stream_proc(proc)
+                except Exception as e:
+                    err_str = f"Failed to spawn mlx_lm.lora: {e}"
+                    sys.stderr.write(err_str + "\n")
+                    lf.write(err_str + "\n")
+                    code = 127
             except Exception as e:
-                err_str = f"Failed to spawn mlx_lm.lora: {e}"
+                err_str = f"Failed to spawn mlx_lm: {e}"
                 sys.stderr.write(err_str + "\n")
                 lf.write(err_str + "\n")
                 code = 127

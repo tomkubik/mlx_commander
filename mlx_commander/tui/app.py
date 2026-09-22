@@ -221,6 +221,79 @@ def execute_conversion(stdscr: curses.window, state: CommanderState) -> Optional
         return None
 
 
+def validate_lora_queue_preconditions(stdscr: curses.window, model_path: str, data_path: str) -> bool:
+    """
+    Validate base model and dataset before queuing or executing runs.
+    Returns True if valid, or False after displaying an informative error dialog.
+    """
+    from mlx_commander.lora.model_info import is_local_path, normalize_model_path, is_model_directory
+
+    # 1. Model validation
+    if not model_path or model_path.strip() in ("", "None", "(No Model Selected)"):
+        show_error_dialog(
+            stdscr,
+            "Base Model Required",
+            "Please select a Base Model (Row 0) before queuing fine-tuning runs.",
+        )
+        return False
+
+    healed_model = normalize_model_path(model_path.strip())
+    if is_local_path(model_path) or is_local_path(healed_model):
+        model_p = Path(healed_model).expanduser().resolve()
+        if not model_p.exists():
+            show_error_dialog(
+                stdscr,
+                "Model Not Found",
+                f"The selected base model directory does not exist on disk:\n\n"
+                f"  {model_path.strip()}\n\n"
+                f"Please select a valid local model directory or Hugging Face model ID.",
+            )
+            return False
+
+        if not is_model_directory(model_p):
+            show_error_dialog(
+                stdscr,
+                "Invalid Model Directory",
+                f"The directory does not appear to contain valid model files:\n\n"
+                f"  {model_path.strip()}\n\n"
+                f"Missing config.json or weights (.safetensors) files.",
+            )
+            return False
+
+    # 2. Dataset validation
+    if not data_path or data_path.strip() in ("", "None"):
+        show_error_dialog(
+            stdscr,
+            "Dataset Required",
+            "Please select a Dataset directory containing 'train.jsonl' (Row 1).",
+        )
+        return False
+
+    data_p = Path(data_path.strip()).expanduser().resolve()
+    if not data_p.exists():
+        show_error_dialog(
+            stdscr,
+            "Dataset Not Found",
+            f"The selected dataset path does not exist on disk:\n\n"
+            f"  {data_path.strip()}\n\n"
+            f"Please convert a dataset in Mode 1 or select an existing folder.",
+        )
+        return False
+
+    train_file = data_p / "train.jsonl" if data_p.is_dir() else data_p
+    if not train_file.exists():
+        show_error_dialog(
+            stdscr,
+            "Missing train.jsonl",
+            f"The dataset directory does not contain 'train.jsonl':\n\n"
+            f"  {data_path.strip()}\n\n"
+            f"Apple MLX fine-tuning requires 'train.jsonl'.",
+        )
+        return False
+
+    return True
+
+
 def execute_lora_queue_action(stdscr: curses.window, state: CommanderState) -> None:
     """Execute queued LoRA fine-tuning runs sequentially via spawned macOS Terminal window."""
     if not state.queue_manager or not state.queue_manager.runs:
@@ -239,6 +312,44 @@ def execute_lora_queue_action(stdscr: curses.window, state: CommanderState) -> N
             "All runs in the queue have already completed. Add a new run [F6] or clone an existing run [c].",
         )
         return
+
+    # Pre-flight check on pending runs before spawning terminal
+    from mlx_commander.lora.model_info import is_local_path, normalize_model_path, is_model_directory
+    for r in pending:
+        healed = normalize_model_path(r.model)
+        if is_local_path(r.model) or is_local_path(healed):
+            if healed != r.model and Path(healed).exists():
+                r.model = healed
+            model_p = Path(r.model).expanduser().resolve()
+            if not model_p.exists():
+                show_error_dialog(
+                    stdscr,
+                    "Model Not Found in Run",
+                    f"Run '{r.name}' specifies a local model that does not exist:\n\n"
+                    f"  {r.model}\n\n"
+                    f"Please update or remove this run before executing.",
+                )
+                return
+            if not is_model_directory(model_p):
+                show_error_dialog(
+                    stdscr,
+                    "Invalid Model Directory in Run",
+                    f"Run '{r.name}' points to an invalid model directory:\n\n"
+                    f"  {r.model}\n\n"
+                    f"Missing config.json or weights (.safetensors) files.",
+                )
+                return
+
+        data_p = Path(r.data).expanduser().resolve()
+        if not data_p.exists() or not (data_p / "train.jsonl" if data_p.is_dir() else data_p).exists():
+            show_error_dialog(
+                stdscr,
+                "Dataset Not Found in Run",
+                f"Run '{r.name}' specifies a dataset without 'train.jsonl':\n\n"
+                f"  {r.data}\n\n"
+                f"Please update or remove this run before executing.",
+            )
+            return
 
     state.queue_manager.save()
 
@@ -1447,9 +1558,14 @@ def _handle_mode2_input(
                     state.lora_config.adapter_path = val.strip()
                     state.lora_config.is_custom_name = True
             elif idx == 14:  # Add to Queue
-                added = state.add_current_lora_to_queue()
-                state.status_message = f"Added '{added.name}' to queue ({len(state.queue_manager.runs)} run(s) queued)."
-                state.status_is_error = False
+                if validate_lora_queue_preconditions(stdscr, state.lora_config.model, state.lora_config.data):
+                    from mlx_commander.lora.model_info import normalize_model_path
+                    healed = normalize_model_path(state.lora_config.model)
+                    if healed and Path(healed).exists():
+                        state.lora_config.model = healed
+                    added = state.add_current_lora_to_queue()
+                    state.status_message = f"Added '{added.name}' to queue ({len(state.queue_manager.runs)} run(s) queued)."
+                    state.status_is_error = False
 
     # Navigation in Queue Panel
     elif state.lora_active_panel == "queue":
@@ -1627,9 +1743,14 @@ def _handle_mode3_input(
                     state.status_message = f"Updated {field_label} conditions: {chosen_vals}"
                     state.status_is_error = False
             elif idx == 13:  # Add sweep to queue
-                added = state.add_multi_lora_runs_to_queue()
-                state.status_message = f"Added {len(added)} sweep run(s) to queue ({len(state.queue_manager.runs)} total queued)."
-                state.status_is_error = False
+                if validate_lora_queue_preconditions(stdscr, state.multi_lora_config.model, state.multi_lora_config.data):
+                    from mlx_commander.lora.model_info import normalize_model_path
+                    healed = normalize_model_path(state.multi_lora_config.model)
+                    if healed and Path(healed).exists():
+                        state.multi_lora_config.model = healed
+                    added = state.add_multi_lora_runs_to_queue()
+                    state.status_message = f"Added {len(added)} sweep run(s) to queue ({len(state.queue_manager.runs)} total queued)."
+                    state.status_is_error = False
 
     # Navigation in Bottom Sweep Panel
     elif state.multi_active_panel == "sweep":
@@ -1640,9 +1761,14 @@ def _handle_mode3_input(
             state.multi_active_panel = "left"
             state.multi_left_focus_idx = 0
         elif key in (10, 13, curses.KEY_ENTER, 32):  # Add sweep to queue
-            added = state.add_multi_lora_runs_to_queue()
-            state.status_message = f"Added {len(added)} sweep run(s) to queue ({len(state.queue_manager.runs)} total queued)."
-            state.status_is_error = False
+            if validate_lora_queue_preconditions(stdscr, state.multi_lora_config.model, state.multi_lora_config.data):
+                from mlx_commander.lora.model_info import normalize_model_path
+                healed = normalize_model_path(state.multi_lora_config.model)
+                if healed and Path(healed).exists():
+                    state.multi_lora_config.model = healed
+                added = state.add_multi_lora_runs_to_queue()
+                state.status_message = f"Added {len(added)} sweep run(s) to queue ({len(state.queue_manager.runs)} total queued)."
+                state.status_is_error = False
 
 
 def run_commander_tui(
@@ -1952,13 +2078,23 @@ def run_commander_tui(
 
             elif key == curses.KEY_F6:
                 if state.active_tab == 2:
-                    added = state.add_multi_lora_runs_to_queue()
-                    state.status_message = f"Added {len(added)} sweep run(s) to queue ({len(state.queue_manager.runs)} total queued)."
-                    state.status_is_error = False
+                    if validate_lora_queue_preconditions(stdscr, state.multi_lora_config.model, state.multi_lora_config.data):
+                        from mlx_commander.lora.model_info import normalize_model_path
+                        healed = normalize_model_path(state.multi_lora_config.model)
+                        if healed and Path(healed).exists():
+                            state.multi_lora_config.model = healed
+                        added = state.add_multi_lora_runs_to_queue()
+                        state.status_message = f"Added {len(added)} sweep run(s) to queue ({len(state.queue_manager.runs)} total queued)."
+                        state.status_is_error = False
                 elif state.active_tab == 1:
-                    added = state.add_current_lora_to_queue()
-                    state.status_message = f"Added '{added.name}' to queue ({len(state.queue_manager.runs)} run(s) queued)."
-                    state.status_is_error = False
+                    if validate_lora_queue_preconditions(stdscr, state.lora_config.model, state.lora_config.data):
+                        from mlx_commander.lora.model_info import normalize_model_path
+                        healed = normalize_model_path(state.lora_config.model)
+                        if healed and Path(healed).exists():
+                            state.lora_config.model = healed
+                        added = state.add_current_lora_to_queue()
+                        state.status_message = f"Added '{added.name}' to queue ({len(state.queue_manager.runs)} run(s) queued)."
+                        state.status_is_error = False
 
             elif key == curses.KEY_F5:
                 if state.active_tab == 0:
@@ -1969,6 +2105,12 @@ def run_commander_tui(
                     execute_lora_queue_action(stdscr, state)
                 else:
                     if not state.queue_manager or not state.queue_manager.get_pending_runs():
+                        if not validate_lora_queue_preconditions(stdscr, state.multi_lora_config.model, state.multi_lora_config.data):
+                            continue
+                        from mlx_commander.lora.model_info import normalize_model_path
+                        healed = normalize_model_path(state.multi_lora_config.model)
+                        if healed and Path(healed).exists():
+                            state.multi_lora_config.model = healed
                         state.add_multi_lora_runs_to_queue()
                     execute_lora_queue_action(stdscr, state)
 
