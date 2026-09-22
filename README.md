@@ -27,6 +27,12 @@ Built entirely with Python's standard library `curses` with zero mandatory depen
   2. **Chat / Messages Format**: `{"messages": [{"role": "system|user|assistant", "content": "..."}]}` — Supports message lists (standard role/content or ShareGPT `from`/`value`), or separate role columns.
   3. **Prompt & Completion Format**: `{"prompt": "...", "completion": "..."}` — Q&A / instruction fine-tuning (`mlx_lm.lora --mask-prompt` compatible).
   4. **DPO / Preference Format**: `{"prompt": "...", "chosen": "...", "rejected": "..."}` — Direct Preference Optimization.
+- **3-Mode Switcher Navigation (`F2`)**: Instant cycling between `[ 1: Dataset Converter ]`, `[ 2: Fine-Tuning Single Run ]`, and `[ 3: Fine-Tuning Multi-Run ]`.
+- **Mode 3: Fine-Tuning Multi-Run (Hyperparameter Sweeps)**: Configure multiple conditions per hyperparameter on a single line with clickable rightmost targets, review a visual Cartesian product grid (`✖` layout), and schedule batch queues.
+- **Unified RAM Safety & Implied Epochs Estimator**: Real-time calculation of peak unified RAM (with `[SAFE]`, `[TIGHT]`, `[OOM RISK]` ratings) and implied epochs (with warning alerts when $< 1.0$).
+- **Generative Test Set Evaluation Engine (experimental)**: Evaluates real model inferences on `test.jsonl` deterministically—measuring Exact Match, Substring Match, Word-Level F1 (Precision & Recall), Categorical Confusion Matrices, and 2×2 Model Migration & Regression Matrices.
+- **3-Tier Storage & Offline Dashboard**: Appends to `eval_leaderboard.csv` (opens in Numbers/Excel), outputs per-run JSON/JSONL artifacts, and renders an interactive offline `eval_comparison.html` dashboard with regression filters and text diffs.
+- **Weights & Biases (W&B) Logging**: Streams training loss and logs interactive evaluation prediction tables (`wandb.Table`) and confusion heatmaps (`wandb.plot.confusion_matrix`).
 - **Flexible Data Loader**: Parquet (`.parquet`), Arrow (`.arrow`), Hugging Face `save_to_disk` directories, JSONL (`.jsonl`), JSON arrays (`.json`), CSV (`.csv`), TSV (`.tsv`), SQLite (`.sqlite`, `.db`), and WebDataset (`.tar`).
 - **Deterministic Splits & Random Seed**: Customizable Train / Validation / Test percentages with 100% reproducible shuffling via random seed.
 - **Ready-to-Use `mlx_lm.lora` Command**: Generates the exact training command ready to copy-paste.
@@ -374,17 +380,133 @@ AI agents that support skill discovery (like **Antigravity**) automatically read
 
 ## 🚀 Running Fine-Tuning with Apple MLX
 
-Once your dataset is converted, fine-tune an LLM on Apple Silicon with `mlx-lm`:
+MLX Commander provides two interactive fine-tuning dashboards directly integrated with Apple MLX (`mlx-lm`):
 
-```bash
-mlx_lm.lora \
-    --model mlx-community/Llama-3.2-3B-Instruct-4bit \
-    --train \
-    --data ./mlx_dataset \
-    --mask-prompt \
-    --iters 600 \
-    --batch-size 4
+---
+
+### 🎛️ Mode 2: Fine-Tuning Single Run
+
+Press `F2` to switch to `[ 2: Fine-Tuning Single Run ]`:
+- **Model & Dataset Configuration**: Select any MLX community model (e.g. `Llama-3.2-3B-Instruct-4bit`, `Qwen2.5-7B-Instruct-4bit`) or local weights.
+- **Unified RAM Safety Estimator**: Computes predicted peak unified memory footprint before starting training, rating safety as `[SAFE]`, `[TIGHT]`, or `[OOM RISK]`.
+- **Implied Epochs Calculation**:
+  $$\text{Epochs} = \frac{\text{iters} \times \text{batch\_size}}{\text{train\_records}}$$
+  If epochs $< 1.0$, the estimate is highlighted in **dark red** to warn that the model will not see the full training set.
+- **Sequential Queue Management**: Add runs to queue with `F6`, inspect queued jobs, and execute sequentially without memory thrashing.
+- **Deterministic Checkpoint Naming**: Adapters are saved with full hyperparameter signatures:
+  `0000400_adapters_lora_r16_a32_lr1e-5_b4_i1000_Llama-3.2-3B-Instruct-4bit.safetensors`
+
+---
+
+### 🎛️ Mode 3: Fine-Tuning Multi-Run (Hyperparameter Sweeps)
+
+Press `F2` to switch to `[ 3: Fine-Tuning Multi-Run ]`:
+- **Single-Line Multi-Value Fields**: Specify multiple condition values per hyperparameter on a single line:
+  ```text
+  Learning Rate:    [ 1e-4 ]  [ 2e-4 ]  [ 5e-4 ]
+  LoRA Rank (r):    [ 2 ]  [ 4 ]  [ 6 ]  [ 8 ]
+  Mask Prompt:      [ True ]  [ False ]
+  ```
+- **Clickable Rightmost Target**: The rightmost box represents the active clickable target. Press `Enter` to open a modal dialog to amend or enter conditions as a comma-separated list (e.g., `2, 4, 8`).
+- **Visual Cartesian Sweep Grid**: Renders a dedicated bottom panel displaying parameter columns, vertically stacked cells with internal dividers, centered `✖` multiplication symbols, and total scheduled run count (e.g. $3 \times 4 \times 2 = 24 \text{ training runs}$).
+- **Aggregated Runtime Estimates**:
+  - **Peak Unified RAM**: Maximum peak RAM across all sweep conditions.
+  - **Total Duration**: Sum of estimated durations for all scheduled runs.
+  - **Min Implied Epochs**: Minimum implied epochs across all conditions.
+
+---
+
+## 📊 Generative Test Set Evaluation Engine (experimental)
+
+Standard `mlx_lm.lora --test` only computes cross-entropy loss and perplexity via teacher forcing—it never actually prompts the model to generate text.
+
+MLX Commander includes a built-in **Generative Evaluation Engine** tagged as `(experimental)`. When enabled, the fine-tuned model loads after training, generates answers token-by-token on `test.jsonl`, and scores them deterministically against golden reference completions without requiring external scripts.
+
+### ⚙️ Enabling the Feature
+In the right-hand hyperparameter pane (available in both Mode 2 and Mode 3):
+- **Field**: `Run evals on test set (experimental): [ No ]`
+- **Default**: `No` (disabled by default so training runs quickly unless explicitly enabled)
+- **Toggling**: Press `Enter` on the field row to flip it to `[ Yes ]` (or enter `Yes, No` conditions in Mode 3).
+
+---
+
+### 📈 Evaluated Metrics
+
+1. **Exact Match (Strict & Normalized)**:
+   - *Strict*: Character-for-character equality (`gen == golden`).
+   - *Normalized*: SQuAD-standard matching stripping whitespace, punctuation, and English articles (`a`, `an`, `the`).
+2. **Substring Contains Match**:
+   - Checks if the golden completion appears anywhere inside the model's generated text (e.g., Golden: `42`, Output: `The answer is 42.`).
+3. **Word-Level Precision, Recall, and F1 Score**:
+   - Evaluates the actual textual words of the output against the target:
+     - **Word Recall**: Did the model capture all key facts?
+     - **Word Precision**: Did the model avoid hallucinations and unnecessary fluff?
+     - **Word F1**: The harmonic mean giving fair partial credit when the model answers correctly in full sentences.
+4. **Generation Speed & Efficiency**:
+   - Measures inference throughput in **Tokens per Second (TPS)** and average latency per sample.
+
+---
+
+### 🧩 The "Matrix of Wrong Answers"
+
+1. **Categorical Confusion Matrix** (for classification tasks):
+   - Automatically computed if the test set has $\le 15$ unique target classes.
+   - Generates a full `[Actual] × [Predicted]` confusion matrix with per-class recall and overall accuracy.
+2. **2×2 Model Migration & Regression Matrix** (for all open-ended text tasks):
+   - Automatically compares the **Baseline Pre-Trained Model** vs the **Post-Tuning LoRA Model**:
+
+```text
+                        POST-TUNING (LoRA)
+                     CORRECT           WRONG
+                ┌────────────────┬────────────────┐
+      CORRECT   │   PRESERVED    │   REGRESSED    │  ◄ Catastrophic forgetting!
+BASELINE        ├────────────────┼────────────────┤
+      WRONG     │     FIXED      │   PERSISTENT   │  ◄ Where LoRA healed the model!
+                └────────────────┴────────────────┘
 ```
+- **`FIXED`**: Prompts the base model failed, but LoRA answered correctly (healed!).
+- **`REGRESSED`**: Prompts the base model got right, but LoRA broke (catastrophic forgetting).
+- **`PRESERVED`**: Prompts both models answered correctly.
+- **`PERSISTENT_FAIL`**: Hard samples failed by both models.
+
+---
+
+### 💾 3-Tier Storage & Offline Dashboard
+
+Evaluation results are organized hierarchically across 3 tiers:
+
+```text
+models/Llama-3.2-3B/adapters/
+├── eval_leaderboard.csv                    <-- TIER 1: Master CSV (open in Numbers/Excel)
+├── eval_comparison.html                   <-- TIER 3: Standalone interactive dashboard
+│
+└── 01_lora_r16_a32_lr1e-4_b4_i1000/
+    ├── adapters.safetensors
+    ├── eval_summary.json                  <-- TIER 2: Run metadata & matrix stats
+    └── eval_predictions.jsonl             <-- TIER 2: Row-by-row prompts, answers, & diffs
+```
+
+1. **Tier 1: Master `eval_leaderboard.csv`**:
+   - Located at the root of `adapters/`.
+   - Appends a row for every completed run with F1, Exact Match %, regression counts, and speed.
+   - Open directly in **Apple Numbers**, **Excel**, or **Google Sheets** to rank sweep runs instantly.
+2. **Tier 2: Per-Run Granular Data (`eval_summary.json` & `eval_predictions.jsonl`)**:
+   - Saved inside each run's adapter folder.
+   - Contains row-by-row prompts, golden completions, baseline outputs, model outputs, and transition statuses.
+3. **Tier 3: Standalone Zero-Dependency `eval_comparison.html`**:
+   - Generated at `adapters/eval_comparison.html`.
+   - Works 100% offline in Safari or Chrome with zero dependencies.
+   - Features metric cards, leaderboard sorting, and a **Sample Explorer** with filter buttons:
+     `[ All ]` &bull; `[ ⚠️ Regressed Only ]` &bull; `[ ❇️ Fixed Only ]` &bull; `[ Preserved ]` &bull; `[ Persistent Fail ]`.
+
+---
+
+### 📡 Weights & Biases (W&B) Integration
+
+When W&B tracking is enabled:
+- Logs scalar metrics: `eval/exact_match_pct`, `eval/word_f1`, `eval/fixed_count`, `eval/regressed_count`, `eval/tokens_per_sec`.
+- Uploads an interactive `wandb.Table` with row-by-row test prompts, outputs, and diffs.
+- Uploads interactive `wandb.plot.confusion_matrix` for categorical classification tasks.
 
 ---
 
@@ -393,5 +515,5 @@ mlx_lm.lora \
 Run the test suite with Python's built-in `unittest`:
 
 ```bash
-.venv/bin/python -m unittest discover -s tests -p "test_*.py" -v
+python3 -m unittest discover tests
 ```

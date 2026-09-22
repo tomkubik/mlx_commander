@@ -687,8 +687,9 @@ def _draw_mode2_dashboard(
         (9, "Mask Prompt", "True" if cfg.mask_prompt else "False", 10, False),
         (10, "Save Every", str(cfg.save_every), 8, False),
         (11, 'Steps per "Eval" (validation loss)', str(cfg.steps_per_eval), 8, False),
-        (12, "Adapter Path", cfg.adapter_path, max(14, right_w - 20), False),
-        (13, "+ Add to Queue (F6)", "", 0, True),
+        (12, "Run evals on test set (experimental)", "Yes" if getattr(cfg, "run_eval", False) else "No", 8, False),
+        (13, "Adapter Path", cfg.adapter_path, max(14, right_w - 20), False),
+        (14, "+ Add to Queue (F6)", "", 0, True),
     ]
 
     # Handle smooth scrolling in single-column hyperparameter list
@@ -931,7 +932,8 @@ def _draw_mode3_dashboard(
         (9, "Mask Prompt", cfg.mask_prompt, bool, False),
         (10, "Save Every", cfg.save_every, int, False),
         (11, 'Steps per "Eval" (validation loss)', cfg.steps_per_eval, int, False),
-        (12, "+ Add Sweep to Queue (F6)", [], None, True),
+        (12, "Run evals on test set (experimental)", getattr(cfg, "run_eval", [False]), bool, False),
+        (13, "+ Add Sweep to Queue (F6)", [], None, True),
     ]
 
     # Handle smooth scrolling in right panel
@@ -1290,7 +1292,7 @@ def _handle_mode2_input(
         if key in (curses.KEY_UP, ord("k")):
             state.lora_right_focus_idx = max(0, state.lora_right_focus_idx - 1)
         elif key in (curses.KEY_DOWN, ord("j")):
-            state.lora_right_focus_idx = min(13, state.lora_right_focus_idx + 1)
+            state.lora_right_focus_idx = min(14, state.lora_right_focus_idx + 1)
         elif key in (curses.KEY_LEFT, ord("h")):
             state.lora_active_panel = "left"
         elif key in (10, 13, curses.KEY_ENTER, 32):  # Enter or Space
@@ -1359,12 +1361,16 @@ def _handle_mode2_input(
                 if val:
                     try: state.lora_config.steps_per_eval = max(1, int(val))
                     except ValueError: pass
-            elif idx == 12:  # Adapter Out
+            elif idx == 12:  # Run evals on test set (experimental)
+                state.lora_config.run_eval = not getattr(state.lora_config, "run_eval", False)
+                state.status_message = f"Run evals on test set (experimental): {'Yes' if state.lora_config.run_eval else 'No'}"
+                state.status_is_error = False
+            elif idx == 13:  # Adapter Out
                 val = show_text_edit_dialog(stdscr, "Adapter Path", "Directory to store fine-tuned LoRA weights:", state.lora_config.adapter_path)
                 if val:
                     state.lora_config.adapter_path = val.strip()
                     state.lora_config.is_custom_name = True
-            elif idx == 13:  # Add to Queue
+            elif idx == 14:  # Add to Queue
                 added = state.add_current_lora_to_queue()
                 state.status_message = f"Added '{added.name}' to queue ({len(state.queue_manager.runs)} run(s) queued)."
                 state.status_is_error = False
@@ -1486,12 +1492,12 @@ def _handle_mode3_input(
         if key in (curses.KEY_UP, ord("k")):
             state.multi_right_focus_idx = max(0, state.multi_right_focus_idx - 1)
         elif key in (curses.KEY_DOWN, ord("j")):
-            state.multi_right_focus_idx = min(12, state.multi_right_focus_idx + 1)
+            state.multi_right_focus_idx = min(13, state.multi_right_focus_idx + 1)
         elif key in (curses.KEY_LEFT, ord("h")):
             state.multi_active_panel = "left"
         elif key in (10, 13, curses.KEY_ENTER, 32):  # Enter or Space
             idx = state.multi_right_focus_idx
-            if idx < 12:
+            if idx < 13:
                 field_name, field_label, field_type = SWEEP_FIELD_DEFS[idx]
                 curr_vals = state.multi_lora_config.get_field_values(field_name)
                 chosen_vals = show_multi_value_edit_dialog(
@@ -1505,7 +1511,7 @@ def _handle_mode3_input(
                     state.multi_lora_config.set_field_values(field_name, chosen_vals)
                     state.status_message = f"Updated {field_label} conditions: {chosen_vals}"
                     state.status_is_error = False
-            elif idx == 12:  # Add sweep to queue
+            elif idx == 13:  # Add sweep to queue
                 added = state.add_multi_lora_runs_to_queue()
                 state.status_message = f"Added {len(added)} sweep run(s) to queue ({len(state.queue_manager.runs)} total queued)."
                 state.status_is_error = False

@@ -441,6 +441,25 @@ class TestLoraUI(unittest.TestCase):
 
         self.assertTrue(found_red_epoch, "Implied Epochs line (< 1.0) should be rendered in COLOR_ERROR")
 
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_mode2_toggle_run_eval(self, mock_curs, mock_colors, mock_has_colors):
+        state = CommanderState()
+        state.active_tab = 1
+        state.lora_active_panel = "right"
+        state.lora_right_focus_idx = 12  # Run evals on test set (experimental)
+        self.assertFalse(state.lora_config.run_eval)
+
+        # Press Enter (10) then 'q'
+        self.mock_win.reset_mock()
+        self.mock_win.getmaxyx.return_value = (35, 120)
+        self.mock_win.getch.side_effect = [10, ord("q")]
+
+        run_commander_tui(self.mock_win, initial_state=state)
+        self.assertTrue(state.lora_config.run_eval)
+        self.assertIn("Run evals on test set (experimental): Yes", state.status_message)
+
 
 if __name__ == "__main__":
     unittest.main()

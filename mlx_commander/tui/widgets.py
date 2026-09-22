@@ -687,7 +687,7 @@ def draw_multi_field(
         if isinstance(v, float):
             disp = f"{v:g}"
         elif isinstance(v, bool):
-            disp = "True" if v else "False"
+            disp = ("Yes" if v else "No") if "eval" in label.lower() else ("True" if v else "False")
         else:
             disp = str(v)
         box_strs.append(f"[ {disp} ]")
@@ -951,7 +951,10 @@ def show_multi_value_edit_dialog(
     if val_type is float:
         default_str = ", ".join(f"{v:g}" for v in current_values)
     elif val_type is bool:
-        default_str = ", ".join("True" if v else "False" for v in current_values)
+        if "eval" in title.lower():
+            default_str = ", ".join("Yes" if v else "No" for v in current_values)
+        else:
+            default_str = ", ".join("True" if v else "False" for v in current_values)
     else:
         default_str = ", ".join(str(v) for v in current_values)
 

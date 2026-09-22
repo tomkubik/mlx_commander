@@ -256,6 +256,66 @@ class WandbTracker:
             except Exception:
                 pass
 
+    def log_eval(self, eval_result: Dict[str, Any]) -> None:
+        """Log generative test set evaluation metrics and prediction table to Weights & Biases."""
+        if not self._is_active or not self.run or not eval_result:
+            return
+
+        try:
+            import wandb
+            summary = eval_result.get("summary", {})
+            predictions = eval_result.get("predictions", [])
+
+            # 1. Log scalar summary metrics
+            eval_scalars = {
+                "eval/exact_match_pct": summary.get("exact_match_pct", 0.0),
+                "eval/substring_match_pct": summary.get("substring_match_pct", 0.0),
+                "eval/word_f1": summary.get("avg_word_f1", 0.0),
+                "eval/word_precision": summary.get("avg_word_prec", 0.0),
+                "eval/word_recall": summary.get("avg_word_recall", 0.0),
+                "eval/fixed_count": summary.get("fixed_count", 0),
+                "eval/regressed_count": summary.get("regressed_count", 0),
+                "eval/tokens_per_sec": summary.get("tokens_per_sec", 0.0),
+            }
+            wandb.log(eval_scalars)
+
+            # Update run summary dictionary
+            for k, v in eval_scalars.items():
+                self.run.summary[k] = v
+
+            # 2. Log sample predictions table
+            if predictions:
+                columns = ["id", "prompt", "golden", "baseline", "model_output", "status", "word_f1", "exact_match"]
+                table_data = []
+                for p in predictions:
+                    table_data.append([
+                        p.get("id", 0),
+                        p.get("prompt", ""),
+                        p.get("golden", ""),
+                        p.get("baseline_output", ""),
+                        p.get("model_output", ""),
+                        p.get("status", ""),
+                        p.get("word_f1", 0.0),
+                        p.get("exact_match_norm", False),
+                    ])
+                table = wandb.Table(columns=columns, data=table_data)
+                wandb.log({"eval/predictions_table": table})
+
+            # 3. Log categorical confusion matrix if available
+            cm_data = summary.get("confusion_matrix")
+            if cm_data and cm_data.get("is_categorical") and predictions:
+                y_true = [p.get("golden", "") for p in predictions]
+                preds = [p.get("model_output", "") for p in predictions]
+                cm = wandb.plot.confusion_matrix(
+                    y_true=y_true,
+                    preds=preds,
+                    class_names=cm_data.get("classes", []),
+                )
+                wandb.log({"eval/confusion_matrix": cm})
+
+        except Exception as e:
+            sys.stderr.write(f"[W&B Warning] Failed to log evaluation to Weights & Biases: {e}\n")
+
     def finish_run(self, exit_code: int = 0) -> Optional[str]:
         """Finish the W&B run, recording exit code and returning the run URL."""
         if not self._is_active or not self.run:

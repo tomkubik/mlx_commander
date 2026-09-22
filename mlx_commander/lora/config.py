@@ -202,6 +202,7 @@ class LoraRunConfig:
     adapter_path: str = "adapters"
     seed: int = 0
     resume_adapter_file: Optional[str] = None
+    run_eval: bool = False
 
     # Queue execution & tracking
     status: str = "queued"  # queued, running, completed, failed, cancelled
@@ -315,7 +316,7 @@ class LoraRunConfig:
                         data[k] = float(v)
                     except ValueError:
                         pass
-                elif k in ("train", "test", "grad_checkpoint", "mask_prompt"):
+                elif k in ("train", "test", "grad_checkpoint", "mask_prompt", "run_eval"):
                     data[k] = v.lower() == "true"
                 else:
                     data[k] = v

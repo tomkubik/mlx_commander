@@ -223,12 +223,14 @@ class TestMultiRunStateAndUI(unittest.TestCase):
 
     @patch("mlx_commander.tui.widgets.curses.has_colors", return_value=False)
     @patch("mlx_commander.tui.widgets.safe_curs_set")
-    def test_show_multi_value_edit_dialog_esc_cancels(self, mock_curs, mock_colors):
+    def test_show_multi_value_edit_dialog_eval_yes_no(self, mock_curs, mock_colors):
         win = MagicMock()
         win.getmaxyx.return_value = (25, 80)
-        win.getch.side_effect = [27]  # ESC
-        res = show_multi_value_edit_dialog(win, "Edit", "Prompt", [8], val_type=int)
-        self.assertIsNone(res)
+        # Type "Yes, No" then Enter
+        keys = [curses.KEY_BACKSPACE] * 20 + [ord(c) for c in "Yes, No"] + [10]
+        win.getch.side_effect = keys
+        res = show_multi_value_edit_dialog(win, "Edit Run evals on test set (experimental)", "Enter eval conditions:", [False], val_type=bool)
+        self.assertEqual(res, [True, False])
 
 
 if __name__ == "__main__":

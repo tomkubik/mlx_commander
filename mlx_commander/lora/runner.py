@@ -241,6 +241,27 @@ def execute_single_run(
     except Exception:
         pass
 
+    # Run Generative Evaluation on test split if enabled
+    if code == 0 and getattr(r, "run_eval", True):
+        ds_test = Path(r.data) / "test.jsonl" if Path(r.data).is_dir() else Path(r.data)
+        if ds_test.exists():
+            print("\n[MLX Commander] Running Generative Evaluation on test set...")
+            try:
+                from ..evals.runner import run_generative_eval
+                eval_res = run_generative_eval(r)
+                if eval_res and "summary" in eval_res:
+                    summ = eval_res["summary"]
+                    tracker.log_eval(eval_res)
+                    print(f"  • Exact Match:      {summ.get('exact_match_pct', 0.0):.1f}%")
+                    print(f"  • Substring Match:  {summ.get('substring_match_pct', 0.0):.1f}%")
+                    print(f"  • Word F1 Score:    {summ.get('avg_word_f1', 0.0):.4f}")
+                    print(f"  • Fixed / Regressed: {summ.get('fixed_count', 0)} / {summ.get('regressed_count', 0)}")
+                    print(f"  • HTML Report:      {eval_res.get('html_dashboard', '')}")
+            except Exception as e:
+                print(f"  [Eval Warning] Generative eval failed: {e}")
+        else:
+            print(f"  [MLX Commander] Skipping generative eval: no test.jsonl found in '{r.data}'.")
+
     wandb_url = tracker.finish_run(exit_code=code)
     if wandb_url:
         r.wandb_url = wandb_url

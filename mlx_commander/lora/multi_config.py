@@ -29,6 +29,7 @@ SWEEP_FIELD_DEFS = [
     ("mask_prompt", "Mask prompt", bool),
     ("save_every", "Save Every", int),
     ("steps_per_eval", 'Steps per "Eval" (validation loss)', int),
+    ("run_eval", "Run evals on test set (experimental)", bool),
 ]
 
 
@@ -61,6 +62,7 @@ class MultiLoraRunConfig:
     mask_prompt: List[bool] = field(default_factory=lambda: [True])
     save_every: List[int] = field(default_factory=lambda: [100])
     steps_per_eval: List[int] = field(default_factory=lambda: [100])
+    run_eval: List[bool] = field(default_factory=lambda: [False])
 
     def get_field_values(self, field_name: str) -> List[Any]:
         """Get the list of values for a specific hyperparameter field."""
@@ -139,6 +141,7 @@ class MultiLoraRunConfig:
                 mask_prompt=comb_dict["mask_prompt"],
                 save_every=comb_dict["save_every"],
                 steps_per_eval=comb_dict["steps_per_eval"],
+                run_eval=comb_dict["run_eval"],
             )
             runs.append(cfg)
 
