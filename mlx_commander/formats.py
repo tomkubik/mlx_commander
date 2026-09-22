@@ -309,71 +309,169 @@ def format_record(
     raise ValueError(f"Unknown MLX format: {format_type}")
 
 
+def _normalize_col_key(k: str) -> str:
+    """Normalize a column name for matching (lowercase, stripped, replace '-' with '_')."""
+    return k.strip().lower().replace("-", "_")
+
+
 def auto_detect_mapping(format_type: MLXFormat, columns: List[str]) -> ColumnMapping:
     """Attempt to intelligently auto-detect column mappings based on common field names."""
-    cols_lower = {col.lower(): col for col in columns}
+    norm_map = {_normalize_col_key(col): col for col in columns}
     mapping = ColumnMapping()
 
+    def find_match(candidates: List[str]) -> Optional[str]:
+        for cand in candidates:
+            norm_cand = _normalize_col_key(cand)
+            if norm_cand in norm_map:
+                return norm_map[norm_cand]
+        return None
+
     if format_type == MLXFormat.TEXT:
-        for candidate in ["text", "content", "body", "document", "raw_text", "sentence"]:
-            if candidate in cols_lower:
-                mapping.text_col = cols_lower[candidate]
-                break
-        if not mapping.text_col and columns:
+        text_candidates = [
+            "text", "content", "body", "document", "raw_text", "sentence",
+            "sentences", "article", "passage", "data", "raw", "tokens",
+        ]
+        match = find_match(text_candidates)
+        if match:
+            mapping.text_col = match
+        elif columns:
             mapping.text_col = columns[0]
 
     elif format_type == MLXFormat.CHAT:
-        # Check for list of messages first
-        for candidate in ["messages", "conversations", "dialog", "dialogue", "chat"]:
-            if candidate in cols_lower:
-                mapping.messages_col = cols_lower[candidate]
-                # Check for ShareGPT style
-                if candidate == "conversations":
-                    mapping.role_key = "from"
-                    mapping.content_key = "value"
-                return mapping
+        messages_candidates = [
+            "messages", "conversations", "dialog", "dialogue", "chat",
+            "history", "turns", "conversation",
+        ]
+        match = find_match(messages_candidates)
+        if match:
+            mapping.messages_col = match
+            if _normalize_col_key(match) == "conversations":
+                mapping.role_key = "from"
+                mapping.content_key = "value"
+            return mapping
 
-        # Check for separate role columns
-        for candidate in ["system", "system_prompt", "instruction_system"]:
-            if candidate in cols_lower:
-                mapping.system_col = cols_lower[candidate]
-                break
-
-        for candidate in ["user", "prompt", "instruction", "input", "query", "question"]:
-            if candidate in cols_lower:
-                mapping.user_col = cols_lower[candidate]
-                break
-
-        for candidate in ["assistant", "response", "output", "completion", "answer"]:
-            if candidate in cols_lower:
-                mapping.assistant_col = cols_lower[candidate]
-                break
+        system_candidates = [
+            "system", "system_prompt", "instruction_system", "system_message", "developer", "context",
+        ]
+        user_candidates = [
+            "user", "human", "prompt", "instruction", "input", "query", "question",
+            "user_message", "client", "problem",
+        ]
+        assistant_candidates = [
+            "assistant", "gpt", "bot", "response", "output", "completion", "answer",
+            "solution", "bot_message", "model", "model_response",
+        ]
+        mapping.system_col = find_match(system_candidates)
+        mapping.user_col = find_match(user_candidates)
+        mapping.assistant_col = find_match(assistant_candidates)
 
     elif format_type == MLXFormat.PROMPT_COMPLETION:
-        for candidate in ["prompt", "instruction", "input", "query", "question", "context"]:
-            if candidate in cols_lower:
-                mapping.prompt_col = cols_lower[candidate]
-                break
+        prompt_candidates = [
+            "prompt", "instruction", "input", "query", "question", "problem",
+            "task", "task_description", "context", "document", "article",
+            "premise", "source", "src", "text", "user_query", "input_text",
+            "goal", "prompts", "instructions", "inputs", "queries",
+            "questions", "problems",
+        ]
+        completion_candidates = [
+            "completion", "output", "response", "answer", "solution",
+            "target", "reference", "reference_answer", "ground_truth",
+            "ground_truth_answer", "gt", "result", "summary", "highlights",
+            "hypothesis", "label", "labels", "reply", "generation",
+            "canonical_solution", "code", "output_text", "model_response",
+            "target_text", "completions", "outputs", "responses", "answers",
+            "solutions", "results",
+        ]
 
-        for candidate in ["completion", "output", "response", "answer", "target"]:
-            if candidate in cols_lower:
-                mapping.completion_col = cols_lower[candidate]
-                break
+        p_match = find_match(prompt_candidates)
+        c_match = find_match(completion_candidates)
+
+        # Disallow mapping both prompt and completion to the exact same column if multiple columns exist
+        if p_match and c_match and p_match == c_match and len(columns) > 1:
+            sub_map = {k: v for k, v in norm_map.items() if v != p_match}
+            c_match = None
+            for cand in completion_candidates:
+                if _normalize_col_key(cand) in sub_map:
+                    c_match = sub_map[_normalize_col_key(cand)]
+                    break
+
+        # Fallback 1: Exactly 2 columns available
+        if len(columns) == 2:
+            if p_match and not c_match:
+                c_match = [c for c in columns if c != p_match][0]
+            elif c_match and not p_match:
+                p_match = [c for c in columns if c != c_match][0]
+            elif not p_match and not c_match:
+                p_match = columns[0]
+                c_match = columns[1]
+
+        # Fallback 2: Prompt matched, but completion unmatched from 3+ columns
+        elif len(columns) >= 3 and p_match and not c_match:
+            meta_keys = {"id", "idx", "index", "uid", "split", "metadata", "meta", "timestamp", "created_at", "source"}
+            rem = [c for c in columns if c != p_match and _normalize_col_key(c) not in meta_keys]
+            if len(rem) == 1:
+                c_match = rem[0]
+
+        mapping.prompt_col = p_match
+        mapping.completion_col = c_match
 
     elif format_type == MLXFormat.DPO:
-        for candidate in ["prompt", "instruction", "input", "question"]:
-            if candidate in cols_lower:
-                mapping.dpo_prompt_col = cols_lower[candidate]
-                break
-
-        for candidate in ["chosen", "preferred", "accepted", "positive"]:
-            if candidate in cols_lower:
-                mapping.chosen_col = cols_lower[candidate]
-                break
-
-        for candidate in ["rejected", "dispreferred", "negative"]:
-            if candidate in cols_lower:
-                mapping.rejected_col = cols_lower[candidate]
-                break
+        dpo_prompt_candidates = [
+            "prompt", "instruction", "input", "question", "query", "problem", "context",
+        ]
+        chosen_candidates = [
+            "chosen", "preferred", "accepted", "positive", "better", "winner",
+            "chosen_response", "selected",
+        ]
+        rejected_candidates = [
+            "rejected", "dispreferred", "negative", "worse", "loser",
+            "rejected_response", "unselected",
+        ]
+        mapping.dpo_prompt_col = find_match(dpo_prompt_candidates)
+        mapping.chosen_col = find_match(chosen_candidates)
+        mapping.rejected_col = find_match(rejected_candidates)
 
     return mapping
+
+
+def auto_detect_format_and_mapping(columns: List[str]) -> Tuple[MLXFormat, ColumnMapping]:
+    """
+    Intelligently determine the most appropriate MLX target format and its column mapping
+    based on the available columns in a dataset.
+    """
+    if not columns:
+        return MLXFormat.PROMPT_COMPLETION, ColumnMapping()
+
+    norm_set = {_normalize_col_key(c) for c in columns}
+
+    # 1. Check for Chat format
+    chat_keys = {"messages", "conversations", "dialog", "dialogue", "chat", "turns"}
+    if norm_set & chat_keys:
+        return MLXFormat.CHAT, auto_detect_mapping(MLXFormat.CHAT, columns)
+
+    if ({"user", "human", "prompt"} & norm_set) and ({"assistant", "gpt", "bot"} & norm_set):
+        return MLXFormat.CHAT, auto_detect_mapping(MLXFormat.CHAT, columns)
+
+    # 2. Check for DPO format
+    if ({"chosen", "preferred", "better", "winner"} & norm_set) and ({"rejected", "dispreferred", "worse", "loser"} & norm_set):
+        return MLXFormat.DPO, auto_detect_mapping(MLXFormat.DPO, columns)
+
+    # 3. Check for 1-column dataset (always Text format)
+    if len(columns) == 1:
+        return MLXFormat.TEXT, auto_detect_mapping(MLXFormat.TEXT, columns)
+
+    # 4. Check for Text format (e.g. text/content without paired completion/answer)
+    text_primary = {"text", "raw_text", "tokens", "passage", "document"}
+    has_text = bool(norm_set & text_primary)
+    completion_keys = {
+        "completion", "output", "response", "answer", "solution", "target",
+        "ground_truth", "gt", "result", "summary", "label", "reply",
+    }
+    has_completion = bool(norm_set & completion_keys)
+
+    if has_text and not has_completion:
+        # If there's a text column with no separate completion column, causal text is best
+        return MLXFormat.TEXT, auto_detect_mapping(MLXFormat.TEXT, columns)
+
+    # 5. Default to Prompt & Completion (Q&A / Instruction)
+    return MLXFormat.PROMPT_COMPLETION, auto_detect_mapping(MLXFormat.PROMPT_COMPLETION, columns)

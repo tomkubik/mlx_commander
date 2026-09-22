@@ -106,7 +106,51 @@ class TestCommanderState(unittest.TestCase):
         state.apply_prefill({"theme_mode": "modern"})
         self.assertEqual(state.theme_mode, ThemeMode.MODERN)
 
+    def test_state_auto_adapts_format_for_chat_and_text(self):
+        # 1. Chat dataset with messages
+        chat_file = Path(self.tmp_dir.name) / "chat.jsonl"
+        with open(chat_file, "w") as f:
+            f.write(json.dumps({"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]}) + "\n")
+
+        state = CommanderState()
+        self.assertEqual(state.target_format, MLXFormat.PROMPT_COMPLETION)
+        state.load_dataset(str(chat_file))
+        self.assertEqual(state.target_format, MLXFormat.CHAT)
+        self.assertEqual(state.mapping.messages_col, "messages")
+        self.assertIsNone(state.preview_error)
+
+        # 2. Text dataset with text + id
+        text_file = Path(self.tmp_dir.name) / "text.jsonl"
+        with open(text_file, "w") as f:
+            f.write(json.dumps({"id": 1, "text": "Pre-training corpus content."}) + "\n")
+
+        state2 = CommanderState()
+        state2.load_dataset(str(text_file))
+        self.assertEqual(state2.target_format, MLXFormat.TEXT)
+        self.assertEqual(state2.mapping.text_col, "text")
+        self.assertIsNone(state2.preview_error)
+
+        # 3. Math dataset with problem / solution
+        math_file = Path(self.tmp_dir.name) / "math.jsonl"
+        with open(math_file, "w") as f:
+            f.write(json.dumps({"problem": "What is 2+2?", "solution": "4"}) + "\n")
+
+        state3 = CommanderState()
+        state3.load_dataset(str(math_file))
+        self.assertEqual(state3.target_format, MLXFormat.PROMPT_COMPLETION)
+        self.assertEqual(state3.mapping.prompt_col, "problem")
+        self.assertEqual(state3.mapping.completion_col, "solution")
+        self.assertIsNone(state3.preview_error)
+
+    def test_map_column_to_field(self):
+        state = CommanderState()
+        state.load_dataset(str(self.src_file))
+        state.map_column_to_field("extra", "prompt_col")
+        self.assertEqual(state.mapping.prompt_col, "extra")
+        self.assertIsNone(state.preview_error)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

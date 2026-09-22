@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mlx-commander"
-version = "0.4.4"
+version = "0.4.5"
 description = "Convert Hugging Face datasets into Apple MLX formats, configure parameters, and run training and fine-tuning via interactive TUI and CLI"
 readme = "README.md"
 license = "MIT"
@@ -24,7 +24,9 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-dependencies = []
+dependencies = [
+    "pyarrow>=12.0.0",
+]
 
 [project.optional-dependencies]
 parquet = [

@@ -437,18 +437,34 @@ def show_missing_dependency_dialog(
 
         k = stdscr.getch()
         if k in (ord("i"), ord("I")):
-            installing_str = f"Installing {package_name} via pip...".ljust(w - 6)
+            installing_str = f"Installing {package_name}...".ljust(w - 6)
             safe_addstr(stdscr, start_y + h - 2, start_x + 3, installing_str[: w - 6], title_attr)
             stdscr.refresh()
+            import os
+            import shutil
             import subprocess
             import sys
+            from pathlib import Path
             try:
+                uv_bin = shutil.which("uv")
+                if not uv_bin:
+                    user_uv = Path.home() / ".local/bin/uv"
+                    if user_uv.exists() and os.access(user_uv, os.X_OK):
+                        uv_bin = str(user_uv)
+
                 res = subprocess.run(
                     [sys.executable, "-m", "pip", "install", package_name],
                     capture_output=True,
                     text=True,
                     timeout=120,
                 )
+                if res.returncode != 0 and uv_bin and ("No module named pip" in (res.stderr or "") or "No module named pip" in (res.stdout or "")):
+                    res = subprocess.run(
+                        [uv_bin, "pip", "install", "--python", sys.executable, package_name],
+                        capture_output=True,
+                        text=True,
+                        timeout=120,
+                    )
                 if res.returncode == 0:
                     ok_str = f"Installed {package_name} successfully!".ljust(w - 6)
                     safe_addstr(stdscr, start_y + h - 2, start_x + 3, ok_str[: w - 6], active_teal)
@@ -456,7 +472,7 @@ def show_missing_dependency_dialog(
                     curses.napms(800)
                     return True
                 else:
-                    err_hint = f"pip install failed (code {res.returncode}). Press any key."
+                    err_hint = f"install failed (code {res.returncode}). Press any key."
                     safe_addstr(stdscr, start_y + h - 2, start_x + 3, err_hint[: w - 6], action_attr)
                     stdscr.refresh()
                     stdscr.getch()
@@ -744,7 +760,7 @@ def show_column_picker_dialog(
     selected_cols: List[str] = list(initial_cols)
     space_used = False
 
-    sel_idx = 0
+    sel_idx = 1 if (allow_none and len(options) > 1) else 0
     if selected_cols:
         for i, opt in enumerate(options):
             if opt == selected_cols[0]:

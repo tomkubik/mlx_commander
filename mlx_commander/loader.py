@@ -64,6 +64,7 @@ def ensure_pyarrow() -> bool:
     Ensure pyarrow and its submodules are imported and ready.
     If pyarrow was installed while the application was running, this re-attempts
     the import and updates global references dynamically so datasets open seamlessly.
+    Also probes standard user/system site-packages if running in an isolated environment.
     """
     global HAS_PYARROW, pa, ds, pa_ipc, pq
     if HAS_PYARROW and pq is not None:
@@ -80,8 +81,54 @@ def ensure_pyarrow() -> bool:
         HAS_PYARROW = True
         return True
     except ImportError:
-        HAS_PYARROW = False
-        return False
+        pass
+
+    # Probe standard site-packages in case pyarrow is installed in user/system packages
+    try:
+        import site
+        candidate_dirs: List[Path] = []
+        try:
+            user_site = site.getusersitepackages()
+            if user_site:
+                candidate_dirs.append(Path(user_site))
+        except Exception:
+            pass
+
+        home = Path.home()
+        for ver in ("3.9", "3.10", "3.11", "3.12", "3.13"):
+            candidate_dirs.append(home / f"Library/Python/{ver}/lib/python/site-packages")
+            candidate_dirs.append(home / f".local/lib/python{ver}/site-packages")
+            candidate_dirs.append(Path(f"/opt/homebrew/lib/python{ver}/site-packages"))
+            candidate_dirs.append(Path(f"/usr/local/lib/python{ver}/site-packages"))
+
+        # Also search uv wheel/archive caches
+        uv_archive = home / ".cache/uv/archive-v0"
+        if uv_archive.is_dir():
+            for pth in uv_archive.glob("*/lib/python*/site-packages"):
+                if (pth / "pyarrow").is_dir():
+                    candidate_dirs.append(pth)
+
+        for c_dir in candidate_dirs:
+            if (c_dir / "pyarrow").is_dir() and str(c_dir) not in sys.path:
+                sys.path.append(str(c_dir))
+                try:
+                    import pyarrow as _pa
+                    import pyarrow.dataset as _ds
+                    import pyarrow.ipc as _pa_ipc
+                    import pyarrow.parquet as _pq
+                    pa = _pa
+                    ds = _ds
+                    pa_ipc = _pa_ipc
+                    pq = _pq
+                    HAS_PYARROW = True
+                    return True
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    HAS_PYARROW = False
+    return False
 
 
 def ensure_duckdb() -> bool:
@@ -798,44 +845,76 @@ def load_from_arrow_file(file_path: Path) -> List[Dict[str, Any]]:
 
 
 def load_from_parquet_file(file_path: Path) -> List[Dict[str, Any]]:
-    """Load records from a Parquet file using pyarrow."""
-    if not ensure_pyarrow() or not HAS_PYARROW:
-        raise MissingDependencyError(
-            format_name="Parquet",
-            package_name="pyarrow",
-            install_command="pip install pyarrow",
-            description="Parquet files use columnar compression (snappy, zstd, dictionary encoding) requiring the high-performance 'pyarrow' library.",
-            extra_name="parquet",
-        )
+    """Load records from a Parquet file using pyarrow (with duckdb/fastparquet fallbacks)."""
+    if ensure_pyarrow() and HAS_PYARROW:
+        try:
+            table = pq.read_table(str(file_path))
+            return table.to_pylist()
+        except Exception as e:
+            raise RuntimeError(f"Failed to read Parquet file '{file_path}': {e}")
+
+    # Fallback to DuckDB if available
+    if ensure_duckdb() and HAS_DUCKDB:
+        try:
+            rel = duckdb.query(f"SELECT * FROM read_parquet('{file_path}')")
+            return [dict(r) for r in rel.df().to_dict(orient="records")]
+        except Exception:
+            pass
+
+    # Fallback to fastparquet if available
     try:
-        table = pq.read_table(str(file_path))
-        return table.to_pylist()
-    except Exception as e:
-        raise RuntimeError(f"Failed to read Parquet file '{file_path}': {e}")
+        import fastparquet
+        pf = fastparquet.ParquetFile(str(file_path))
+        return [dict(r) for r in pf.to_pandas().to_dict(orient="records")]
+    except Exception:
+        pass
+
+    raise MissingDependencyError(
+        format_name="Parquet",
+        package_name="pyarrow",
+        install_command="pip install pyarrow",
+        description="Parquet files use columnar compression (snappy, zstd, dictionary encoding) requiring the high-performance 'pyarrow' library.",
+        extra_name="parquet",
+    )
 
 
 def load_from_parquet_dir(dir_path: Path) -> List[Dict[str, Any]]:
     """Load records from a directory of Parquet files (sharded dataset) using pyarrow.dataset."""
-    if not ensure_pyarrow() or not HAS_PYARROW:
-        raise MissingDependencyError(
-            format_name="Parquet",
-            package_name="pyarrow",
-            install_command="pip install pyarrow",
-            description="Parquet files use columnar compression (snappy, zstd, dictionary encoding) requiring the high-performance 'pyarrow' library.",
-            extra_name="parquet",
-        )
-    try:
-        target_dir = dir_path
-        # If no parquet files in root but exists in data/ subdirectory
-        if not any(f.name.lower().endswith(PARQUET_EXTS) for f in dir_path.iterdir() if f.is_file()):
-            data_sub = dir_path / "data"
-            if data_sub.is_dir():
-                target_dir = data_sub
-        dataset = ds.dataset(str(target_dir), format="parquet")
-        table = dataset.to_table()
-        return table.to_pylist()
-    except Exception as e:
-        raise RuntimeError(f"Failed to read Parquet directory '{dir_path}': {e}")
+    if ensure_pyarrow() and HAS_PYARROW:
+        try:
+            target_dir = dir_path
+            # If no parquet files in root but exists in data/ subdirectory
+            if not any(f.name.lower().endswith(PARQUET_EXTS) for f in dir_path.iterdir() if f.is_file()):
+                data_sub = dir_path / "data"
+                if data_sub.is_dir():
+                    target_dir = data_sub
+            dataset = ds.dataset(str(target_dir), format="parquet")
+            table = dataset.to_table()
+            return table.to_pylist()
+        except Exception as e:
+            raise RuntimeError(f"Failed to read Parquet directory '{dir_path}': {e}")
+
+    # Fallback to DuckDB if available
+    if ensure_duckdb() and HAS_DUCKDB:
+        try:
+            target_dir = dir_path
+            if not any(f.name.lower().endswith(PARQUET_EXTS) for f in dir_path.iterdir() if f.is_file()):
+                data_sub = dir_path / "data"
+                if data_sub.is_dir():
+                    target_dir = data_sub
+            glob_path = str(target_dir / "*.parquet")
+            rel = duckdb.query(f"SELECT * FROM read_parquet('{glob_path}')")
+            return [dict(r) for r in rel.df().to_dict(orient="records")]
+        except Exception:
+            pass
+
+    raise MissingDependencyError(
+        format_name="Parquet",
+        package_name="pyarrow",
+        install_command="pip install pyarrow",
+        description="Parquet files use columnar compression (snappy, zstd, dictionary encoding) requiring the high-performance 'pyarrow' library.",
+        extra_name="parquet",
+    )
 
 
 def is_lance_dir(path: Path) -> bool:

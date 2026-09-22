@@ -112,6 +112,62 @@ class TestFormats(unittest.TestCase):
         self.assertEqual(mapping.prompt_col, "instruction")
         self.assertEqual(mapping.completion_col, "output")
 
+    def test_auto_detect_mapping_gsm8k_and_math_synonyms(self):
+        # Math datasets with problem / solution
+        cols = ["problem", "solution"]
+        mapping = auto_detect_mapping(MLXFormat.PROMPT_COMPLETION, cols)
+        self.assertEqual(mapping.prompt_col, "problem")
+        self.assertEqual(mapping.completion_col, "solution")
+
+        # Questions / answers plural and kebab-case / snake_case
+        cols2 = ["input-text", "ground_truth"]
+        mapping2 = auto_detect_mapping(MLXFormat.PROMPT_COMPLETION, cols2)
+        self.assertEqual(mapping2.prompt_col, "input-text")
+        self.assertEqual(mapping2.completion_col, "ground_truth")
+
+    def test_auto_detect_mapping_two_column_fallback(self):
+        cols = ["col_a", "col_b"]
+        mapping = auto_detect_mapping(MLXFormat.PROMPT_COMPLETION, cols)
+        self.assertEqual(mapping.prompt_col, "col_a")
+        self.assertEqual(mapping.completion_col, "col_b")
+
+    def test_auto_detect_format_and_mapping(self):
+        from mlx_commander.formats import auto_detect_format_and_mapping
+
+        # Chat format via messages
+        fmt, m = auto_detect_format_and_mapping(["id", "messages"])
+        self.assertEqual(fmt, MLXFormat.CHAT)
+        self.assertEqual(m.messages_col, "messages")
+
+        # Chat format via conversations (ShareGPT)
+        fmt, m = auto_detect_format_and_mapping(["conversations"])
+        self.assertEqual(fmt, MLXFormat.CHAT)
+        self.assertEqual(m.messages_col, "conversations")
+        self.assertEqual(m.role_key, "from")
+        self.assertEqual(m.content_key, "value")
+
+        # DPO format
+        fmt, m = auto_detect_format_and_mapping(["prompt", "chosen", "rejected"])
+        self.assertEqual(fmt, MLXFormat.DPO)
+        self.assertEqual(m.chosen_col, "chosen")
+        self.assertEqual(m.rejected_col, "rejected")
+
+        # 1-column dataset (always text)
+        fmt, m = auto_detect_format_and_mapping(["random_column"])
+        self.assertEqual(fmt, MLXFormat.TEXT)
+        self.assertEqual(m.text_col, "random_column")
+
+        # Text with metadata
+        fmt, m = auto_detect_format_and_mapping(["id", "text", "source"])
+        self.assertEqual(fmt, MLXFormat.TEXT)
+        self.assertEqual(m.text_col, "text")
+
+        # GSM8K / Q&A format
+        fmt, m = auto_detect_format_and_mapping(["question", "answer"])
+        self.assertEqual(fmt, MLXFormat.PROMPT_COMPLETION)
+        self.assertEqual(m.prompt_col, "question")
+        self.assertEqual(m.completion_col, "answer")
+
 
     def test_parse_column_list(self):
         from mlx_commander.formats import parse_column_list

@@ -1138,6 +1138,25 @@ def _handle_mode1_input(
                                 state.load_dataset(chosen)
                         else:
                             show_error_dialog(stdscr, "Dataset Loading Failed", state.status_message)
+            elif state.left_focus_idx == 1 and state.loaded_dataset and state.loaded_dataset.columns:
+                col_idx = state.selected_column_idx
+                if 0 <= col_idx < len(state.loaded_dataset.columns):
+                    c_name = state.loaded_dataset.columns[col_idx]
+                    mapping_fields = state.get_mapping_fields_for_format()
+                    labels = [f["label"] for f in mapping_fields]
+                    chosen_label = show_choice_dialog(
+                        stdscr,
+                        f"Map Column '{c_name}'",
+                        f"Assign '{c_name}' to MLX target field:",
+                        labels,
+                    )
+                    if chosen_label:
+                        for f in mapping_fields:
+                            if f["label"] == chosen_label:
+                                state.set_mapping_field(f["key"], c_name)
+                                state.status_message = f"Mapped column '{c_name}' to {chosen_label}."
+                                state.status_is_error = False
+                                break
 
     # Navigation in Right Panel (Tab 2)
     elif is_right:
@@ -1168,12 +1187,14 @@ def _handle_mode1_input(
                 btn_y = 8 + len(mapping_fields) + 3 + 1 + 1
                 safe_addstr(stdscr, btn_y, left_w + 2, " " * (right_w - 4), get_color(COLOR_PANEL_BG))
                 stdscr.refresh()
+                # Required fields must not allow selecting (None / Skip)
+                is_optional = f_info["key"] in ("system_col", "text_template")
                 chosen = show_column_picker_dialog(
                     stdscr,
                     f"Select Column for '{f_info['label']}'",
                     cols,
                     current_val=f_info["current"],
-                    allow_none=True,
+                    allow_none=is_optional,
                 )
                 state.set_mapping_field(f_info["key"], chosen)
             elif idx == 4 + len(mapping_fields):  # Train %

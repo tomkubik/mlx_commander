@@ -16,6 +16,7 @@ from mlx_commander.converter import ConversionResult, convert_and_save
 from mlx_commander.formats import (
     ColumnMapping,
     MLXFormat,
+    auto_detect_format_and_mapping,
     auto_detect_mapping,
     format_record,
     validate_mapping,
@@ -347,12 +348,14 @@ class CommanderState:
             self.selected_column_idx = 0
             self.column_scroll_offset = 0
 
-            # If the dataset contains only a "text" column and user has not switched format, default to TEXT format
-            if ds.columns == ["text"] and self.target_format == MLXFormat.PROMPT_COMPLETION:
-                self.target_format = MLXFormat.TEXT
+            # Intelligently detect the most suitable MLX format based on dataset columns
+            detected_format, detected_map = auto_detect_format_and_mapping(ds.columns)
+            if self.target_format == MLXFormat.PROMPT_COMPLETION:
+                self.target_format = detected_format
+                auto = detected_map
+            else:
+                auto = auto_detect_mapping(self.target_format, ds.columns)
 
-            # Auto-detect column mapping for current format
-            auto = auto_detect_mapping(self.target_format, ds.columns)
             if custom_mapping is not None:
                 self.mapping = custom_mapping
                 # Backfill unset fields from auto detection
@@ -648,3 +651,7 @@ class CommanderState:
             elif key == "dpo_prompt_col":
                 self.mapping.prompt_col = value
             self.update_preview()
+
+    def map_column_to_field(self, col_name: str, field_key: str) -> None:
+        """Map a dataset column to a specific mapping field and update preview."""
+        self.set_mapping_field(field_key, col_name)

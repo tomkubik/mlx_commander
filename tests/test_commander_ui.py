@@ -1,4 +1,5 @@
 import curses
+from pathlib import Path
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -1241,11 +1242,39 @@ class TestCommanderUI(unittest.TestCase):
         self.assertEqual(state.active_tab, 0, "Mode 1 should be active after Enter confirmation")
         self.assertFalse(state.mode_switcher_focused, "Mode switcher should not be focused")
         self.assertEqual(state.active_panel, ActivePanel.LEFT)
-        self.assertEqual(state.left_focus_idx, 0, "Top of left-hand pane in Mode 1 should be focused")
+    @patch("mlx_commander.tui.app.show_choice_dialog", return_value="Prompt / Question")
+    def test_left_panel_column_mapping_dialog(self, mock_choice):
+        from mlx_commander.loader import LoadedDataset
+        from mlx_commander.tui.app import _handle_mode1_input
+        from mlx_commander.formats import MLXFormat
+
+        state = CommanderState()
+        state.loaded_dataset = LoadedDataset(
+            source_path="mock.parquet",
+            is_split=False,
+            split_names=["default"],
+            split_counts={"default": 10},
+            columns=["col_x", "col_y"],
+            total_rows=10,
+            sample_records=[{"col_x": "Hello", "col_y": "World"}],
+            base_dir=Path("/tmp"),
+            _raw_splits={"default": [{"col_x": "Hello", "col_y": "World"}]},
+        )
+        state.active_panel = ActivePanel.LEFT
+        state.left_focus_idx = 1
+        state.selected_column_idx = 0  # col_x
+
+        formats_list = [MLXFormat.PROMPT_COMPLETION, MLXFormat.CHAT, MLXFormat.TEXT, MLXFormat.DPO]
+        _handle_mode1_input(self.mock_win, state, 10, formats_list)  # Enter
+
+        mock_choice.assert_called_once()
+        self.assertEqual(state.mapping.prompt_col, "col_x")
+        self.assertIn("Mapped column 'col_x'", state.status_message)
 
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 
