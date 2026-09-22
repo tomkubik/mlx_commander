@@ -163,10 +163,16 @@ class CommanderState:
                 or self.current_model_metadata.name == self.lora_config.model
             ):
                 self._inspected_model_target = self.lora_config.model
+                if hasattr(self.current_model_metadata, "engine"):
+                    self.lora_config.engine = self.current_model_metadata.engine
+                    self.multi_lora_config.engine = self.current_model_metadata.engine
                 return self.current_model_metadata
         meta = inspect_local_model(self.lora_config.model)
         self.current_model_metadata = meta
         self._inspected_model_target = self.lora_config.model
+        if hasattr(meta, "engine"):
+            self.lora_config.engine = meta.engine
+            self.multi_lora_config.engine = meta.engine
         return meta
 
     def get_wandb_status(self, force_refresh: bool = False) -> Dict[str, Any]:

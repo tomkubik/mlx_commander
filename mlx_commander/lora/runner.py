@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
 from .config import LoraRunConfig, format_adapter_filename
+from .model_info import is_engine_installed, is_local_path, is_model_directory, normalize_model_path
 from .queue import QueueManager
 from .tracking import WandbTracker
 
@@ -141,8 +142,6 @@ def execute_single_run(
     cfg_file = mgr.configs_dir / f"{r.id}.yaml"
     log_file = mgr.logs_dir / f"{r.id}.log"
 
-    from .model_info import is_local_path, is_model_directory, normalize_model_path
-
     # Pre-flight Validation: Model Path
     healed_model = normalize_model_path(r.model)
     if is_local_path(r.model) or is_local_path(healed_model):
@@ -193,21 +192,66 @@ def execute_single_run(
         mgr.update_run_status(run_id, "failed", exit_code=1, error_message=err_msg)
         return 1
 
+    # Pre-flight Validation: Engine Dependency
+    engine = getattr(r, "engine", "mlx_lm")
+    if engine == "mlx_vlm" and not is_engine_installed("mlx_vlm"):
+        err_msg = (
+            f"The required fine-tuning engine 'mlx-vlm' is not installed in the current Python environment.\n"
+            f"To install it, run:\n"
+            f"    pip install \"mlx-vlm[train]\"\n"
+        )
+        sys.stderr.write(f"\n[ERROR] {err_msg}\n")
+        with open(log_file, "w", encoding="utf-8") as lf:
+            lf.write(f"=== MLX Commander LoRA Run: {r.name} ===\n\n[ERROR] {err_msg}\n")
+        mgr.update_run_status(run_id, "failed", exit_code=1, error_message=err_msg)
+        return 1
+
     # Initialize Weights & Biases tracking if enabled and authenticated
     tracker = WandbTracker(project=wandb_project or r.wandb_project, enabled=enable_wandb)
     tracker.start_run(r)
 
     mgr.update_run_status(run_id, "running")
     print(f"\n[MLX Commander] Starting run: {r.name}")
+    print(f"  Engine:     {'mlx-vlm' if engine == 'mlx_vlm' else 'mlx-lm'}")
     print(f"  Model:      {r.model}")
     print(f"  Data:       {r.data}")
-    print(f"  Config:     {cfg_file}")
+    if engine != "mlx_vlm":
+        print(f"  Config:     {cfg_file}")
     print(f"  Output Log: {log_file}")
     if tracker.run_url:
         print(f"  W&B Run:    {tracker.run_url}")
     print("-" * 60)
 
-    cmd = [sys.executable, "-m", "mlx_lm", "lora", "--config", str(cfg_file)]
+    if engine == "mlx_vlm":
+        cmd = [
+            sys.executable, "-m", "mlx_vlm", "lora",
+            "--model-path", str(r.model),
+            "--dataset", str(r.data),
+            "--batch-size", str(r.batch_size),
+            "--iters", str(r.iters),
+            "--learning-rate", f"{r.learning_rate:g}",
+            "--steps-per-report", str(r.steps_per_report),
+            "--steps-per-eval", str(r.steps_per_eval),
+            "--steps-per-save", str(r.save_every),
+            "--val-batches", str(r.val_batches),
+            "--max-seq-length", str(r.max_seq_length),
+            "--lora-rank", str(r.lora_rank),
+            "--lora-alpha", f"{r.lora_alpha:g}",
+            "--lora-dropout", f"{r.lora_dropout:g}",
+            "--output-path", str(r.adapter_path),
+        ]
+        if r.grad_checkpoint:
+            cmd.append("--grad-checkpoint")
+        if getattr(r, "train_on_completions", True) or r.mask_prompt:
+            cmd.append("--train-on-completions")
+        if getattr(r, "train_vision", False):
+            cmd.append("--train-vision")
+        if r.seed != 0:
+            cmd.extend(["--seed", str(r.seed)])
+        if r.resume_adapter_file:
+            cmd.extend(["--resume-adapter-file", str(r.resume_adapter_file)])
+    else:
+        cmd = [sys.executable, "-m", "mlx_lm", "lora", "--config", str(cfg_file)]
 
     with open(log_file, "w", encoding="utf-8") as lf:
         lf.write(f"=== MLX Commander LoRA Run: {r.name} ===\n")
@@ -222,7 +266,7 @@ def execute_single_run(
                 lf.flush()
                 tracker.log_line(line)
                 if "hfvalidationerror" in line.lower() or "repo id must be in the form" in line.lower():
-                    hint = f"\n  [MLX Commander Hint] mlx_lm could not find model '{r.model}' on disk and attempted to download it from Hugging Face Hub.\n"
+                    hint = f"\n  [MLX Commander Hint] {engine} could not find model '{r.model}' on disk and attempted to download it from Hugging Face Hub.\n"
                     sys.stdout.write(hint)
                     lf.write(hint)
                 if "save" in line.lower() or "saved" in line.lower() or "iter" in line.lower():
@@ -250,8 +294,8 @@ def execute_single_run(
             code = _stream_proc(proc)
         except FileNotFoundError:
             try:
-                # Fallback: python -m mlx_lm.lora
-                cmd_alt = [sys.executable, "-m", "mlx_lm.lora", "--config", str(cfg_file)]
+                # Fallback: python -m {engine}.lora
+                cmd_alt = [sys.executable, "-m", f"{engine}.lora"] + cmd[4:]
                 proc = subprocess.Popen(
                     cmd_alt,
                     stdout=subprocess.PIPE,
@@ -260,24 +304,8 @@ def execute_single_run(
                     bufsize=1,
                 )
                 code = _stream_proc(proc)
-            except FileNotFoundError:
-                try:
-                    # Fallback: standalone mlx_lm.lora binary
-                    proc = subprocess.Popen(
-                        ["mlx_lm.lora", "--config", str(cfg_file)],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        bufsize=1,
-                    )
-                    code = _stream_proc(proc)
-                except Exception as e:
-                    err_str = f"Failed to spawn mlx_lm.lora: {e}"
-                    sys.stderr.write(err_str + "\n")
-                    lf.write(err_str + "\n")
-                    code = 127
             except Exception as e:
-                err_str = f"Failed to spawn mlx_lm: {e}"
+                err_str = f"Failed to spawn {engine}.lora: {e}"
                 sys.stderr.write(err_str + "\n")
                 lf.write(err_str + "\n")
                 code = 127

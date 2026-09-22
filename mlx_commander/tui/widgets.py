@@ -1738,7 +1738,10 @@ def draw_queue_table(
         # Underneath line: Full Config Specification
         if row_stride == 2 and (row_y + 1) < (header_y + avail_rows):
             model_slug = getattr(run, "model", "").split("/")[-1]
-            cfg_parts = [
+            cfg_parts = []
+            if getattr(run, "engine", "mlx_lm") == "mlx_vlm":
+                cfg_parts.append("engine=mlx-vlm")
+            cfg_parts.extend([
                 f"model={model_slug}",
                 f"iters={getattr(run, 'iters', 1000)}",
                 f"batch={getattr(run, 'batch_size', 4)}",
@@ -1747,7 +1750,7 @@ def draw_queue_table(
                 f"alpha={getattr(run, 'lora_alpha', 16.0):g}",
                 f"layers={getattr(run, 'num_layers', 16)}",
                 f"grad_chk={getattr(run, 'grad_checkpoint', True)}",
-            ]
+            ])
             wandb_u = getattr(run, "wandb_url", None)
             if wandb_u:
                 cfg_parts.append(f"W&B={wandb_u}")

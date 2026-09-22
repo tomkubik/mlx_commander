@@ -5,6 +5,7 @@ attention heads, context length, vocab size, quantization) directly from local
 model files (config.json, safetensors) saved on drive.
 """
 
+import importlib.util
 import json
 import os
 import re
@@ -12,6 +13,132 @@ import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+KNOWN_VLM_MODEL_TYPES = {
+    "gemma4",
+    "gemma4_unified",
+    "gemma3n",
+    "qwen2_vl",
+    "qwen2_5_vl",
+    "qwen3_vl",
+    "qwen3_omni_moe",
+    "llava",
+    "llava_next",
+    "llava_onevision",
+    "paligemma",
+    "paligemma2",
+    "idefics",
+    "idefics2",
+    "idefics3",
+    "pixtral",
+    "molmo",
+    "molmo2",
+    "smolvlm",
+    "phi3_v",
+    "phi4mm",
+    "mllama",
+    "deepseek_vl",
+    "deepseek_vl_v2",
+    "internvl",
+    "minicpmv",
+    "minicpmo",
+}
+
+
+def detect_model_engine(
+    raw_config: Optional[Dict[str, Any]] = None,
+    model_name_or_path: Optional[str] = None,
+) -> str:
+    """
+    Detect whether a model requires 'mlx_vlm' (Vision-Language / Multimodal Model)
+    or standard 'mlx_lm' based on config.json parameters or model name/path.
+    """
+    if raw_config:
+        # 1. Direct VLM configuration sub-dicts or multimodal token IDs
+        vlm_keys = ("vision_config", "audio_config", "image_token_id", "video_token_id")
+        for k in vlm_keys:
+            if k in raw_config:
+                return "mlx_vlm"
+
+        # 2. Model type check
+        model_type = str(raw_config.get("model_type", "")).lower()
+        if model_type in KNOWN_VLM_MODEL_TYPES:
+            return "mlx_vlm"
+        for vlm_type in KNOWN_VLM_MODEL_TYPES:
+            if vlm_type in model_type:
+                return "mlx_vlm"
+
+        # 3. Architectures check
+        archs = raw_config.get("architectures", [])
+        if isinstance(archs, list):
+            for arch in archs:
+                arch_str = str(arch).lower()
+                if any(
+                    term in arch_str
+                    for term in (
+                        "vision",
+                        "vlm",
+                        "vl",
+                        "paligemma",
+                        "llava",
+                        "gemma4",
+                        "gemma3n",
+                        "mllama",
+                        "smolvlm",
+                        "pixtral",
+                        "molmo",
+                        "idefics",
+                    )
+                ):
+                    return "mlx_vlm"
+
+    if model_name_or_path:
+        low_str = str(model_name_or_path).lower()
+        vlm_name_indicators = (
+            "gemma4",
+            "gemma-4",
+            "gemma_4",
+            "gemma3n",
+            "gemma-3n",
+            "gemma_3n",
+            "qwen2-vl",
+            "qwen2_vl",
+            "qwen2.5-vl",
+            "qwen3-vl",
+            "qwen3_vl",
+            "paligemma",
+            "llava",
+            "smolvlm",
+            "pixtral",
+            "molmo",
+            "idefics",
+            "phi3-v",
+            "phi3_v",
+            "phi4mm",
+            "mllama",
+            "minicpm-v",
+            "minicpmv",
+            "internvl",
+            "deepseek-vl",
+            "deepseek_vl",
+            "-vl-",
+            "-vl",
+            "_vl",
+        )
+        for ind in vlm_name_indicators:
+            if ind in low_str:
+                return "mlx_vlm"
+
+    return "mlx_lm"
+
+
+def is_engine_installed(engine: str) -> bool:
+    """Check if the given engine ('mlx_lm' or 'mlx_vlm') is installed and importable."""
+    try:
+        return importlib.util.find_spec(engine) is not None
+    except Exception:
+        return False
 
 
 @dataclass
@@ -30,6 +157,8 @@ class ModelMetadata:
     file_size_gb: float = 0.0
     is_valid: bool = False
     raw_config: Dict[str, Any] = field(default_factory=dict)
+    engine: str = "mlx_lm"  # "mlx_lm" or "mlx_vlm"
+    is_vlm: bool = False
 
     def format_hyperparameters_line(self) -> str:
         """Return a formatted string of key hyperparameters."""
@@ -37,12 +166,15 @@ class ModelMetadata:
             return "(No local model config found on drive)"
 
         parts: List[str] = []
+        if self.is_vlm or self.engine == "mlx_vlm":
+            parts.append("engine=mlx-vlm")
         if self.architecture and self.architecture != "Unknown":
             parts.append(f"arch={self.architecture}")
         if self.num_layers is not None:
             parts.append(f"{self.num_layers} layers")
         if self.hidden_size is not None:
             parts.append(f"{self.hidden_size} dim")
+
         if self.num_heads is not None:
             if self.num_kv_heads is not None and self.num_kv_heads != self.num_heads:
                 parts.append(f"{self.num_heads} heads (KV: {self.num_kv_heads})")
@@ -473,13 +605,17 @@ def inspect_local_model(path_str: Optional[str]) -> ModelMetadata:
                         model_dir = s
                         break
     else:
-        # Path does not exist on disk
+        # Path does not exist on disk (could be a Hugging Face model ID or missing folder)
         slug = clean_path.split("/")[-1]
+        engine = detect_model_engine(model_name_or_path=clean_path)
+        is_vlm = (engine == "mlx_vlm")
         return ModelMetadata(
             name=slug,
             path=clean_path,
-            architecture="Not Found",
+            architecture="HuggingFace Hub / Remote" if not is_local_path(clean_path) else "Not Found",
             is_valid=False,
+            engine=engine,
+            is_vlm=is_vlm,
         )
 
     # Compute weight size on disk
@@ -612,6 +748,8 @@ def inspect_local_model(path_str: Optional[str]) -> ModelMetadata:
             else:
                 quant_str = "16-bit (unquantized)"
 
+        engine = detect_model_engine(raw_config=raw_cfg, model_name_or_path=clean_path)
+        is_vlm = (engine == "mlx_vlm")
         return ModelMetadata(
             name=model_name,
             path=str(model_dir),
@@ -626,6 +764,8 @@ def inspect_local_model(path_str: Optional[str]) -> ModelMetadata:
             file_size_gb=round(size_gb, 2) if size_gb >= 0.01 else (round(size_gb, 4) if size_gb > 0 else 0.0),
             is_valid=True,
             raw_config=raw_cfg,
+            engine=engine,
+            is_vlm=is_vlm,
         )
 
     # Fallback: Check for safetensors files in directory if no config.json
@@ -655,6 +795,8 @@ def inspect_local_model(path_str: Optional[str]) -> ModelMetadata:
         low_name = str(clean_path).lower()
         quant = "4-bit" if ("4bit" in low_name or "int4" in low_name) else "Safetensors"
 
+        engine = detect_model_engine(model_name_or_path=clean_path)
+        is_vlm = (engine == "mlx_vlm")
         return ModelMetadata(
             name=model_name,
             path=str(model_dir),
@@ -665,15 +807,21 @@ def inspect_local_model(path_str: Optional[str]) -> ModelMetadata:
             quantization=quant,
             file_size_gb=round(size_gb, 2),
             is_valid=True,
+            engine=engine,
+            is_vlm=is_vlm,
         )
 
     # No config.json or safetensors found
+    engine = detect_model_engine(model_name_or_path=clean_path)
+    is_vlm = (engine == "mlx_vlm")
     return ModelMetadata(
         name=model_name,
         path=str(model_dir),
         architecture="Local Directory",
         file_size_gb=round(size_gb, 2),
         is_valid=False,
+        engine=engine,
+        is_vlm=is_vlm,
     )
 
 

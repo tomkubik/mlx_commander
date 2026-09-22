@@ -292,6 +292,22 @@ def validate_lora_queue_preconditions(stdscr: curses.window, model_path: str, da
         )
         return False
 
+    # 3. Engine dependency validation
+    from mlx_commander.lora.model_info import detect_model_engine, is_engine_installed, inspect_local_model
+    meta = inspect_local_model(model_path.strip())
+    engine = getattr(meta, "engine", None) or detect_model_engine(raw_config=meta.raw_config if meta else None, model_name_or_path=model_path.strip())
+    if engine == "mlx_vlm" and not is_engine_installed("mlx_vlm"):
+        show_error_dialog(
+            stdscr,
+            "Missing Dependency: mlx-vlm",
+            f"The selected model requires 'mlx-vlm' (Vision-Language / Multimodal model):\n\n"
+            f"  Model: {model_path.strip()}\n\n"
+            f"Please install it in your Python environment by running:\n\n"
+            f"  pip install \"mlx-vlm[train]\"\n\n"
+            f"Note: mlx-vlm requires Python 3.10+.",
+        )
+        return False
+
     return True
 
 
@@ -315,8 +331,20 @@ def execute_lora_queue_action(stdscr: curses.window, state: CommanderState) -> N
         return
 
     # Pre-flight check on pending runs before spawning terminal
-    from mlx_commander.lora.model_info import is_local_path, normalize_model_path, is_model_directory
+    from mlx_commander.lora.model_info import is_local_path, normalize_model_path, is_model_directory, is_engine_installed
     for r in pending:
+        engine = getattr(r, "engine", "mlx_lm")
+        if engine == "mlx_vlm" and not is_engine_installed("mlx_vlm"):
+            show_error_dialog(
+                stdscr,
+                "Missing Dependency: mlx-vlm",
+                f"Run '{r.name}' requires 'mlx-vlm', which is not installed:\n\n"
+                f"Please run:\n"
+                f"  pip install \"mlx-vlm[train]\"\n\n"
+                f"before executing the queue.",
+            )
+            return
+
         healed = normalize_model_path(r.model)
         if is_local_path(r.model) or is_local_path(healed):
             if healed != r.model and Path(healed).exists():
@@ -732,6 +760,17 @@ def _draw_mode2_dashboard(
         model_disp = "…" + model_disp[-(left_w - 19):]
     draw_field(stdscr, 2, 2, "Base Model", model_disp, is_focused=m_focus, val_width=max(14, left_w - 18), has_dropdown=True, right_edge=left_right_edge)
 
+    # Engine badge & Architecture specs
+    meta = state.inspect_current_model()
+    is_vlm = getattr(meta, "is_vlm", False) or getattr(state.lora_config, "engine", "mlx_lm") == "mlx_vlm"
+    badge_str = "[MLX-VLM]" if is_vlm else "[MLX-LM]"
+    gray_dim = (get_color(COLOR_LABEL_GRAY) | curses.A_DIM) if curses.has_colors() else curses.A_DIM
+    badge_attr = (get_color(COLOR_TITLE_ACCENT) | curses.A_BOLD) if (curses.has_colors() and is_vlm) else gray_dim
+    safe_addstr(stdscr, 3, 2, badge_str, badge_attr)
+    specs = meta.format_hyperparameters_line() if meta and meta.is_valid else ""
+    if specs:
+        safe_addstr(stdscr, 3, 2 + len(badge_str) + 1, specs[:left_w - 5 - len(badge_str)], gray_dim)
+
     # Field 1: Dataset Directory
     d_focus = is_lora_left and state.lora_left_focus_idx == 1
     data_disp = state.lora_config.data or "None"
@@ -975,6 +1014,17 @@ def _draw_mode3_dashboard(
     if len(model_disp) > left_w - 18:
         model_disp = "…" + model_disp[-(left_w - 19):]
     draw_field(stdscr, 2, 2, "Base Model", model_disp, is_focused=m_focus, val_width=max(14, left_w - 18), has_dropdown=True, right_edge=left_right_edge)
+
+    # Engine badge & Architecture specs
+    meta = state.inspect_current_model()
+    is_vlm = getattr(meta, "is_vlm", False) or getattr(state.multi_lora_config, "engine", "mlx_lm") == "mlx_vlm"
+    badge_str = "[MLX-VLM]" if is_vlm else "[MLX-LM]"
+    gray_dim = (get_color(COLOR_LABEL_GRAY) | curses.A_DIM) if curses.has_colors() else curses.A_DIM
+    badge_attr = (get_color(COLOR_TITLE_ACCENT) | curses.A_BOLD) if (curses.has_colors() and is_vlm) else gray_dim
+    safe_addstr(stdscr, 3, 2, badge_str, badge_attr)
+    specs = meta.format_hyperparameters_line() if meta and meta.is_valid else ""
+    if specs:
+        safe_addstr(stdscr, 3, 2 + len(badge_str) + 1, specs[:left_w - 5 - len(badge_str)], gray_dim)
 
     # Field 1: Dataset Directory
     d_focus = is_multi_left and state.multi_left_focus_idx == 1
@@ -1266,6 +1316,18 @@ def _handle_mode1_input(
                             state.switch_mode(1)
                             state.status_message = f"Base model set to: {meta.name}. Now select your training dataset below."
                             state.status_is_error = False
+                            if getattr(meta, "engine", "mlx_lm") == "mlx_vlm":
+                                from mlx_commander.lora.model_info import is_engine_installed
+                                if not is_engine_installed("mlx_vlm"):
+                                    show_error_dialog(
+                                        stdscr,
+                                        "Dependency Required: mlx-vlm",
+                                        f"Model '{meta.name}' requires 'mlx-vlm' (Vision-Language / Multimodal model).\n\n"
+                                        f"'mlx-vlm' is not currently installed in this Python environment.\n"
+                                        f"Please install it to run fine-tuning:\n\n"
+                                        f"  pip install \"mlx-vlm[train]\"\n\n"
+                                        f"Note: mlx-vlm requires Python 3.10+.",
+                                    )
                     else:
                         if not state.load_dataset(chosen):
                             if state.last_missing_dependency:
@@ -1450,6 +1512,18 @@ def _handle_mode2_input(
                     state.clear_estimates_cache()
                     state.status_message = f"Base model set to: {state.lora_config.model}"
                     state.status_is_error = False
+                    if getattr(meta, "engine", "mlx_lm") == "mlx_vlm":
+                        from mlx_commander.lora.model_info import is_engine_installed
+                        if not is_engine_installed("mlx_vlm"):
+                            show_error_dialog(
+                                stdscr,
+                                "Dependency Required: mlx-vlm",
+                                f"Model '{meta.name}' requires 'mlx-vlm' (Vision-Language / Multimodal model).\n\n"
+                                f"'mlx-vlm' is not currently installed in this Python environment.\n"
+                                f"Please install it to run fine-tuning:\n\n"
+                                f"  pip install \"mlx-vlm[train]\"\n\n"
+                                f"Note: mlx-vlm requires Python 3.10+.",
+                            )
             elif idx == 1:  # Dataset
                 chosen = show_dataset_picker_dialog(stdscr, state.lora_config.data)
                 if chosen:
@@ -1695,6 +1769,18 @@ def _handle_mode3_input(
                     state.clear_estimates_cache()
                     state.status_message = f"Base model set to: {state.multi_lora_config.model}"
                     state.status_is_error = False
+                    if getattr(meta, "engine", "mlx_lm") == "mlx_vlm":
+                        from mlx_commander.lora.model_info import is_engine_installed
+                        if not is_engine_installed("mlx_vlm"):
+                            show_error_dialog(
+                                stdscr,
+                                "Dependency Required: mlx-vlm",
+                                f"Model '{meta.name}' requires 'mlx-vlm' (Vision-Language / Multimodal model).\n\n"
+                                f"'mlx-vlm' is not currently installed in this Python environment.\n"
+                                f"Please install it to run fine-tuning:\n\n"
+                                f"  pip install \"mlx-vlm[train]\"\n\n"
+                                f"Note: mlx-vlm requires Python 3.10+.",
+                            )
             elif idx == 1:  # Dataset
                 chosen = show_dataset_picker_dialog(stdscr, state.multi_lora_config.data)
                 if chosen:

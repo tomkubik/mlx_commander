@@ -194,15 +194,24 @@ class QueueManager:
         for idx, r in enumerate(self.runs, 1):
             cfg_file = self.configs_dir / f"{r.id}.yaml"
             log_file = self.logs_dir / f"{r.id}.log"
+            is_vlm = getattr(r, "engine", "mlx_lm") == "mlx_vlm"
+            if is_vlm:
+                run_cmd = f'{r.to_cli_command()} 2>&1 | tee "{log_file}"'
+                cfg_desc = "mlx-vlm (direct CLI)"
+            else:
+                run_cmd = f'mlx_lm.lora --config "{cfg_file}" 2>&1 | tee "{log_file}"'
+                cfg_desc = str(cfg_file)
+
             lines.extend([
                 "echo ''",
                 f"echo '▶ [{idx}/{len(self.runs)}] Running: {r.name}'",
+                f"echo '  Engine: {'mlx-vlm' if is_vlm else 'mlx-lm'}'",
                 f"echo '  Model:  {r.model}'",
                 f"echo '  Data:   {r.data}'",
-                f"echo '  Config: {cfg_file}'",
+                f"echo '  Config: {cfg_desc}'",
                 f"echo '  Log:    {log_file}'",
                 "echo '---------------------------------------------------'",
-                f'mlx_lm.lora --config "{cfg_file}" 2>&1 | tee "{log_file}"',
+                run_cmd,
                 f'python3 -m mlx_commander.lora.runner --rename-adapters "{r.adapter_path}" --config "{cfg_file}" 2>&1 | tee -a "{log_file}"',
                 f"echo '✔ [{idx}/{len(self.runs)}] Completed: {r.name}'",
             ])

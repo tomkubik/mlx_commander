@@ -23,7 +23,9 @@ from .estimator import (
 )
 from .model_info import (
     ModelMetadata,
+    detect_model_engine,
     inspect_local_model,
+    is_engine_installed,
     is_local_path,
     is_model_directory,
     normalize_model_path,
@@ -63,6 +65,8 @@ __all__ = [
     "is_wandb_logged_in",
     "parse_mlx_log_line",
     "ModelMetadata",
+    "detect_model_engine",
+    "is_engine_installed",
     "inspect_local_model",
     "is_local_path",
     "is_model_directory",

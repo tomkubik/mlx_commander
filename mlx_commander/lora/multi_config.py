@@ -48,6 +48,9 @@ class MultiLoraRunConfig:
     seed: int = 0
     val_batches: int = 25
     grad_accumulation_steps: int = 1
+    engine: str = "mlx_lm"
+    train_vision: bool = False
+    train_on_completions: bool = True
 
     # Hyperparameter lists (each can hold 1 or more conditions)
     iters: List[int] = field(default_factory=lambda: [1000])
@@ -142,6 +145,9 @@ class MultiLoraRunConfig:
                 save_every=comb_dict["save_every"],
                 steps_per_eval=comb_dict["steps_per_eval"],
                 run_eval=comb_dict["run_eval"],
+                engine=self.engine,
+                train_vision=self.train_vision,
+                train_on_completions=self.train_on_completions,
             )
             runs.append(cfg)
 

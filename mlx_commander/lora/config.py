@@ -203,6 +203,9 @@ class LoraRunConfig:
     seed: int = 0
     resume_adapter_file: Optional[str] = None
     run_eval: bool = False
+    engine: str = "mlx_lm"  # "mlx_lm" or "mlx_vlm"
+    train_vision: bool = False
+    train_on_completions: bool = True
 
     # Queue execution & tracking
     status: str = "queued"  # queued, running, completed, failed, cancelled
@@ -316,8 +319,10 @@ class LoraRunConfig:
                         data[k] = float(v)
                     except ValueError:
                         pass
-                elif k in ("train", "test", "grad_checkpoint", "mask_prompt", "run_eval"):
+                elif k in ("train", "test", "grad_checkpoint", "mask_prompt", "run_eval", "train_vision", "train_on_completions"):
                     data[k] = v.lower() == "true"
+                elif k == "engine":
+                    data[k] = v
                 else:
                     data[k] = v
         return cls.from_dict(data)
@@ -325,6 +330,7 @@ class LoraRunConfig:
     def to_mlx_yaml(self) -> str:
         """Generate YAML configuration compliant with mlx_lm.lora --config schema."""
         lines = [
+            f'# Engine: {self.engine}',
             f'model: "{self.model}"',
             f'train: {"true" if self.train else "false"}',
             f'data: "{self.data}"',
@@ -354,7 +360,37 @@ class LoraRunConfig:
         return "\n".join(lines) + "\n"
 
     def to_cli_command(self, config_file: Optional[str] = None) -> str:
-        """Generate the equivalent mlx_lm.lora command invocation."""
+        """Generate the equivalent mlx_lm.lora or mlx_vlm.lora command invocation."""
+        if getattr(self, "engine", "mlx_lm") == "mlx_vlm":
+            cmd = [
+                "mlx_vlm.lora",
+                f"--model-path {self.model}",
+                f"--dataset {self.data}",
+                f"--batch-size {self.batch_size}",
+                f"--iters {self.iters}",
+                f"--learning-rate {self.learning_rate:g}",
+                f"--steps-per-report {self.steps_per_report}",
+                f"--steps-per-eval {self.steps_per_eval}",
+                f"--steps-per-save {self.save_every}",
+                f"--val-batches {self.val_batches}",
+                f"--max-seq-length {self.max_seq_length}",
+                f"--lora-rank {self.lora_rank}",
+                f"--lora-alpha {self.lora_alpha:g}",
+                f"--lora-dropout {self.lora_dropout:g}",
+                f"--output-path {self.adapter_path}",
+            ]
+            if self.grad_checkpoint:
+                cmd.append("--grad-checkpoint")
+            if getattr(self, "train_on_completions", True) or self.mask_prompt:
+                cmd.append("--train-on-completions")
+            if getattr(self, "train_vision", False):
+                cmd.append("--train-vision")
+            if self.seed != 0:
+                cmd.append(f"--seed {self.seed}")
+            if self.resume_adapter_file:
+                cmd.append(f"--resume-adapter-file {self.resume_adapter_file}")
+            return " ".join(cmd)
+
         if config_file:
             return f"mlx_lm.lora --config {config_file}"
         cmd = [
