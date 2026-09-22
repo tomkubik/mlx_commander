@@ -92,7 +92,7 @@ def init_nc_palette() -> Tuple[int, int, int, int, int, int, int]:
       - Background Blue: #0000AA (Classic VGA Blue)
       - Highlight / Cyan: #00AAAA (Cyan)
       - Main Text / White: #FFFFFF (Bright White)
-      - Label / Light Gray: #AAAAAA (Light Gray)
+      - Label / Light Gray: #D1D1D1 (Off-White / Light Gray for high contrast on blue)
       - Cursor / Yellow: #FFFF55 (Bright Yellow)
       - Prompt / Black: #000000 (Black)
       - Inactive Input Ice Blue: #55FFFF (Bright Cyan / Ice Blue)
@@ -102,7 +102,7 @@ def init_nc_palette() -> Tuple[int, int, int, int, int, int, int]:
         curses.init_color(20, 0, 0, 666)         # #0000AA (Classic VGA Blue)
         curses.init_color(21, 0, 666, 666)       # #00AAAA (Cyan)
         curses.init_color(22, 1000, 1000, 1000)  # #FFFFFF (Bright White)
-        curses.init_color(23, 666, 666, 666)     # #AAAAAA (Light Gray)
+        curses.init_color(23, 820, 820, 820)     # #D1D1D1 (Off-White / Light Gray for high contrast on blue)
         curses.init_color(24, 1000, 1000, 333)   # #FFFF55 (Bright Yellow)
         curses.init_color(25, 0, 0, 0)           # #000000 (Black)
         curses.init_color(26, 333, 1000, 1000)   # #55FFFF (Ice Blue / Bright Cyan)
@@ -110,8 +110,8 @@ def init_nc_palette() -> Tuple[int, int, int, int, int, int, int]:
     elif curses.COLORS >= 256:
         # Closest 256-color palette slots:
         # 19: #0000af (Blue), 37: #00afaf (Cyan), 15: #ffffff (White),
-        # 248: #a8a8a8 (Light Gray), 227: #ffff5f (Yellow), 0: #000000 (Black), 51: #00ffff (Ice Blue)
-        return 19, 37, 15, 248, 227, 0, 51
+        # 252: #d0d0d0 (Light Gray / Off-White), 227: #ffff5f (Yellow), 0: #000000 (Black), 51: #00ffff (Ice Blue)
+        return 19, 37, 15, 252, 227, 0, 51
     else:
         # 16-color standard ANSI fallback
         return (

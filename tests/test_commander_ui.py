@@ -547,7 +547,7 @@ class TestCommanderUI(unittest.TestCase):
         mock_init_color.assert_any_call(20, 0, 0, 666)          # #0000AA (Classic VGA Blue)
         mock_init_color.assert_any_call(21, 0, 666, 666)        # #00AAAA (Cyan)
         mock_init_color.assert_any_call(22, 1000, 1000, 1000)   # #FFFFFF (Bright White)
-        mock_init_color.assert_any_call(23, 666, 666, 666)      # #AAAAAA (Light Gray)
+        mock_init_color.assert_any_call(23, 820, 820, 820)      # #D1D1D1 (Off-White / Light Gray)
         mock_init_color.assert_any_call(24, 1000, 1000, 333)    # #FFFF55 (Bright Yellow)
         mock_init_color.assert_any_call(25, 0, 0, 0)            # #000000 (Black)
         mock_init_color.assert_any_call(26, 333, 1000, 1000)   # #55FFFF (Ice Blue)
