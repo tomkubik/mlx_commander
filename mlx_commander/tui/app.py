@@ -76,6 +76,7 @@ from mlx_commander.tui.widgets import (
     show_dataset_source_dialog,
     show_error_dialog,
     show_help_dialog,
+    show_label_mapping_dialog,
     show_message_dialog,
     show_missing_dependency_dialog,
     show_model_picker_dialog,
@@ -1317,20 +1318,42 @@ def _handle_mode1_input(
                 state.set_format(formats_list[idx])
             elif 4 <= idx <= 3 + len(mapping_fields):
                 f_info = mapping_fields[idx - 4]
-                cols = state.loaded_dataset.columns if state.loaded_dataset else []
-                btn_y = 8 + len(mapping_fields) + 3 + 1 + 1
-                safe_addstr(stdscr, btn_y, left_w + 2, " " * (right_w - 4), get_color(COLOR_PANEL_BG))
-                stdscr.refresh()
-                # Required fields must not allow selecting (None / Skip)
-                is_optional = f_info["key"] in ("system_col", "text_template")
-                chosen = show_column_picker_dialog(
-                    stdscr,
-                    f"Select Column for '{f_info['label']}'",
-                    cols,
-                    current_val=f_info["current"],
-                    allow_none=is_optional,
-                )
-                state.set_mapping_field(f_info["key"], chosen)
+                if f_info.get("is_system_prompt"):
+                    val = show_text_edit_dialog(
+                        stdscr,
+                        "Default System Prompt",
+                        "Enter system prompt for all records (leave blank for none):",
+                        state.mapping.default_system_prompt or "",
+                    )
+                    if val is not None:
+                        state.mapping.default_system_prompt = val.strip() if val.strip() else None
+                        state.update_preview()
+                elif f_info.get("is_label_map"):
+                    target_col = state.mapping.completion_col or state.mapping.assistant_col or "label"
+                    disc_info = state.get_discrete_labels_for_target()
+                    new_map = show_label_mapping_dialog(
+                        stdscr,
+                        target_col,
+                        disc_info,
+                        state.mapping.label_map,
+                    )
+                    state.mapping.label_map = new_map
+                    state.update_preview()
+                else:
+                    cols = state.loaded_dataset.columns if state.loaded_dataset else []
+                    btn_y = 8 + len(mapping_fields) + 3 + 1 + 1
+                    safe_addstr(stdscr, btn_y, left_w + 2, " " * (right_w - 4), get_color(COLOR_PANEL_BG))
+                    stdscr.refresh()
+                    # Required fields must not allow selecting (None / Skip)
+                    is_optional = f_info["key"] in ("system_col", "text_template")
+                    chosen = show_column_picker_dialog(
+                        stdscr,
+                        f"Select Column for '{f_info['label']}'",
+                        cols,
+                        current_val=f_info["current"],
+                        allow_none=is_optional,
+                    )
+                    state.set_mapping_field(f_info["key"], chosen)
             elif idx == 4 + len(mapping_fields):  # Train %
                 val = show_text_edit_dialog(stdscr, "Train Split %", "Enter Train percentage (0-100):", f"{state.train_pct:.0f}", is_number=True)
                 if val:

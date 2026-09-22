@@ -21,6 +21,9 @@ class TestLoraUI(unittest.TestCase):
         self.mock_win.getmaxyx.return_value = (35, 120)
         self.temp_dir = tempfile.mkdtemp()
         self.queue_dir = Path(self.temp_dir) / "test_runs"
+        self.dataset_dir = Path(self.temp_dir) / "dataset"
+        self.dataset_dir.mkdir(parents=True, exist_ok=True)
+        (self.dataset_dir / "train.jsonl").write_text('{"text": "hi"}\n')
 
     @patch("mlx_commander.tui.app.curses.has_colors", return_value=False)
     @patch("mlx_commander.tui.app.init_colors")
@@ -52,6 +55,7 @@ class TestLoraUI(unittest.TestCase):
         state.active_tab = 1
         state.queue_manager = QueueManager(self.queue_dir)
         state.lora_config.model = "mlx-community/Llama-3.2-3B-Instruct-4bit"
+        state.lora_config.data = str(self.dataset_dir)
 
         # Press F6 to add to queue, then 'q'
         self.mock_win.getch.side_effect = [

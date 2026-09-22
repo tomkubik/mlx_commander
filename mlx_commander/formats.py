@@ -7,10 +7,11 @@ Supports Apple MLX (mlx-lm) fine-tuning formats:
 - DPO / Preference format: {"prompt": "...", "chosen": "...", "rejected": "..."}
 """
 
+import json
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 
 class MLXFormat(str, Enum):
@@ -72,8 +73,60 @@ class ColumnMapping:
     chosen_col: Optional[str] = None
     rejected_col: Optional[str] = None
 
+    # System prompt override / injection
+    default_system_prompt: Optional[str] = None
+
+    # Label / Class semantic rewriting (e.g. {"0": "negative", "1": "neutral", "2": "positive"})
+    label_map: Optional[Dict[str, str]] = None
+
     def to_dict(self) -> Dict[str, Any]:
         return {k: v for k, v in self.__dict__.items() if v is not None}
+
+
+def parse_label_map(val: Any) -> Optional[Dict[str, str]]:
+    """
+    Parse a label mapping specification into a Dict[str, str].
+    Supports:
+      - Dict[Any, Any]: {"0": "negative", 1: "neutral"}
+      - JSON string: '{"0": "negative", "1": "neutral"}'
+      - Delimited pairs: "0:negative,1:neutral,2:positive" or "0=negative, 1=neutral"
+    """
+    if val is None:
+        return None
+    if isinstance(val, dict):
+        return {str(k).strip(): str(v).strip() for k, v in val.items()}
+    if not isinstance(val, str):
+        return None
+    clean = val.strip()
+    if not clean:
+        return None
+    if clean.startswith("{"):
+        try:
+            d = json.loads(clean)
+            if isinstance(d, dict):
+                return {str(k).strip(): str(v).strip() for k, v in d.items()}
+        except Exception:
+            pass
+    result: Dict[str, str] = {}
+    for part in clean.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if ":" in part:
+            k, v = part.split(":", 1)
+            result[k.strip()] = v.strip()
+        elif "=" in part:
+            k, v = part.split("=", 1)
+            result[k.strip()] = v.strip()
+    return result if result else None
+
+
+def _apply_label_map(val: str, label_map: Optional[Dict[str, str]]) -> str:
+    """Apply label mapping rewrite to a string value if matched."""
+    if not label_map or not val:
+        return val
+    clean_val = val.strip()
+    return label_map.get(clean_val, val)
 
 
 def extract_template_vars(template: str) -> List[str]:
@@ -229,6 +282,11 @@ def format_record(
             text = get_column_value(record, mapping.text_col)
         else:
             text = ""
+
+        if mapping.default_system_prompt and mapping.default_system_prompt.strip():
+            sys_p = mapping.default_system_prompt.strip()
+            text = f"{sys_p}\n\n{text}" if text else sys_p
+
         return {"text": text}
 
     elif format_type == MLXFormat.CHAT:
@@ -242,10 +300,14 @@ def format_record(
                         raw_role = item.get(mapping.role_key, "user")
                         role = normalize_role(raw_role, mapping.role_map)
                         content = str(item.get(mapping.content_key, ""))
+                        if role == "assistant" and mapping.label_map:
+                            content = _apply_label_map(content, mapping.label_map)
                         messages.append({"role": role, "content": content})
                     elif isinstance(item, (list, tuple)) and len(item) >= 2:
                         role = normalize_role(item[0], mapping.role_map)
                         content = str(item[1])
+                        if role == "assistant" and mapping.label_map:
+                            content = _apply_label_map(content, mapping.label_map)
                         messages.append({"role": role, "content": content})
         else:
             # Multi-column mapping
@@ -264,10 +326,19 @@ def format_record(
                 })
             if mapping.assistant_col:
                 asst_content = get_column_value(record, mapping.assistant_col)
+                if mapping.label_map:
+                    asst_content = _apply_label_map(asst_content, mapping.label_map)
                 messages.append({
                     "role": "assistant",
                     "content": asst_content,
                 })
+
+        # Inject default_system_prompt if provided and not already present
+        if mapping.default_system_prompt and mapping.default_system_prompt.strip():
+            sys_p = mapping.default_system_prompt.strip()
+            has_system = any(m.get("role") == "system" and str(m.get("content", "")).strip() for m in messages)
+            if not has_system:
+                messages.insert(0, {"role": "system", "content": sys_p})
 
         return {"messages": messages}
 
@@ -279,7 +350,13 @@ def format_record(
         else:
             prompt = ""
 
+        if mapping.default_system_prompt and mapping.default_system_prompt.strip():
+            sys_p = mapping.default_system_prompt.strip()
+            prompt = f"{sys_p}\n\n{prompt}" if prompt else sys_p
+
         completion = get_column_value(record, mapping.completion_col) if mapping.completion_col else ""
+        if mapping.label_map:
+            completion = _apply_label_map(completion, mapping.label_map)
 
         return {"prompt": prompt, "completion": completion}
 
@@ -290,6 +367,15 @@ def format_record(
         else:
             p_val = get_column_value(record, p_col)
 
+        if mapping.default_system_prompt and mapping.default_system_prompt.strip():
+            sys_p = mapping.default_system_prompt.strip()
+            if isinstance(p_val, str):
+                p_val = f"{sys_p}\n\n{p_val}" if p_val else sys_p
+            elif isinstance(p_val, list):
+                has_sys = any(isinstance(m, dict) and m.get("role") == "system" for m in p_val)
+                if not has_sys:
+                    p_val = [{"role": "system", "content": sys_p}] + list(p_val)
+
         if mapping.chosen_col and mapping.chosen_col in record and isinstance(record[mapping.chosen_col], (dict, list)):
             c_val = record[mapping.chosen_col]
         else:
@@ -299,6 +385,12 @@ def format_record(
             r_val = record[mapping.rejected_col]
         else:
             r_val = get_column_value(record, mapping.rejected_col)
+
+        if mapping.label_map:
+            if isinstance(c_val, str):
+                c_val = _apply_label_map(c_val, mapping.label_map)
+            if isinstance(r_val, str):
+                r_val = _apply_label_map(r_val, mapping.label_map)
 
         return {
             "prompt": p_val,

@@ -286,6 +286,7 @@ class LoadedDataset:
     total_rows: int
     sample_records: List[Dict[str, Any]]
     base_dir: Optional[Path] = None
+    features: Dict[str, Any] = field(default_factory=dict)
     _raw_splits: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     @property
@@ -332,6 +333,94 @@ class LoadedDataset:
     def get_all_records(self) -> List[Dict[str, Any]]:
         """Return all records across all splits as a list."""
         return list(self.iter_records())
+
+
+def detect_column_discrete_labels(
+    dataset: LoadedDataset,
+    column: Optional[str],
+    max_classes: int = 12,
+    max_sample_rows: int = 200,
+) -> Optional[Dict[str, Any]]:
+    """
+    Detect if a target/label column in a dataset contains discrete categories or class indices.
+    Extracts Hugging Face ClassLabel names if present in dataset.features, or detects
+    small integer sets (e.g. 0, 1, 2) from sample records.
+
+    Returns a dict with:
+      - 'discrete': True
+      - 'unique_values': List of unique stringified labels found, e.g. ['0', '1', '2']
+      - 'suggested_map': Optional Dict[str, str] mapping indices to semantic names
+      - 'hf_class_names': Optional List[str] of canonical HF class names
+      - 'is_integer_labels': bool indicating if raw values are numeric codes
+    Or None if the column is continuous text or has more than max_classes unique values.
+    """
+    if not dataset or not column or column not in dataset.columns:
+        return None
+
+    # 1. Check dataset.features (Hugging Face ClassLabel or Feature dict)
+    feat = dataset.features.get(column) if dataset.features else None
+    if feat is not None:
+        names = getattr(feat, "names", None)
+        if names is None and isinstance(feat, dict) and "names" in feat:
+            names = feat["names"]
+        if names and isinstance(names, (list, tuple)):
+            names_list = [str(n) for n in names]
+            indices = [str(i) for i in range(len(names_list))]
+            return {
+                "discrete": True,
+                "unique_values": indices,
+                "suggested_map": {str(i): names_list[i] for i in range(len(names_list))},
+                "hf_class_names": names_list,
+                "is_integer_labels": True,
+            }
+
+    # 2. Inspect sample records from LoadedDataset
+    sampled_vals: List[Any] = []
+    for r in dataset.sample_records:
+        if column in r and r[column] is not None:
+            sampled_vals.append(r[column])
+
+    # If sample_records is small (< max_sample_rows), pull up to max_sample_rows using iter_records
+    if len(sampled_vals) < max_sample_rows:
+        count = len(sampled_vals)
+        for r in dataset.iter_records():
+            if column in r and r[column] is not None:
+                sampled_vals.append(r[column])
+                count += 1
+                if count >= max_sample_rows:
+                    break
+
+    if not sampled_vals:
+        return None
+
+    unique_set = set()
+    is_all_int_like = True
+    for v in sampled_vals:
+        if isinstance(v, bool):
+            unique_set.add(int(v))
+        elif isinstance(v, int):
+            unique_set.add(v)
+        elif isinstance(v, float) and v.is_integer():
+            unique_set.add(int(v))
+        elif isinstance(v, str) and v.strip().lstrip("-").isdigit():
+            unique_set.add(int(v.strip()))
+        else:
+            is_all_int_like = False
+            unique_set.add(str(v).strip())
+
+    if len(unique_set) < 2 or len(unique_set) > max_classes:
+        return None
+
+    sorted_vals = sorted(list(unique_set), key=lambda x: (isinstance(x, str), x))
+    str_vals = [str(x) for x in sorted_vals]
+
+    return {
+        "discrete": True,
+        "unique_values": str_vals,
+        "suggested_map": None,
+        "hf_class_names": None,
+        "is_integer_labels": is_all_int_like,
+    }
 
 
 def _normalize_path_list(path_input: Union[str, Path, List[Union[str, Path]]]) -> List[str]:
@@ -976,6 +1065,7 @@ def load_single_local_dataset(path: Union[Path, str]) -> LoadedDataset:
                     split_counts = {k: len(loaded[k]) for k in split_names}
                     first_split = loaded[split_names[0]]
                     cols = first_split.column_names
+                    feats = getattr(first_split, "features", {})
                     total = sum(split_counts.values())
                     samples = [dict(first_split[i]) for i in range(min(5, len(first_split)))]
                     return LoadedDataset(
@@ -987,10 +1077,12 @@ def load_single_local_dataset(path: Union[Path, str]) -> LoadedDataset:
                         total_rows=total,
                         sample_records=samples,
                         base_dir=file_path.resolve(),
+                        features=feats if isinstance(feats, dict) else {},
                         _raw_splits=dict(loaded),
                     )
                 elif isinstance(loaded, Dataset):
                     cols = loaded.column_names
+                    feats = getattr(loaded, "features", {})
                     total = len(loaded)
                     samples = [dict(loaded[i]) for i in range(min(5, len(loaded)))]
                     return LoadedDataset(
@@ -1002,6 +1094,7 @@ def load_single_local_dataset(path: Union[Path, str]) -> LoadedDataset:
                         total_rows=total,
                         sample_records=samples,
                         base_dir=file_path.resolve(),
+                        features=feats if isinstance(feats, dict) else {},
                         _raw_splits={"default": loaded},
                     )
             except Exception:
@@ -1289,6 +1382,7 @@ def load_local_dataset(path_input: Union[str, Path, List[Union[str, Path]]]) -> 
         total_rows=total_rows,
         sample_records=merged_records[:5],
         base_dir=base_ds.base_dir,
+        features=getattr(base_ds, "features", {}),
         _raw_splits={"default": merged_records},
     )
 

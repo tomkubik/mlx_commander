@@ -22,6 +22,7 @@ from mlx_commander.formats import (
     ColumnMapping,
     MLXFormat,
     auto_detect_mapping,
+    parse_label_map,
     validate_mapping,
 )
 from mlx_commander.exceptions import MissingDependencyError
@@ -36,15 +37,29 @@ def parse_mapping_arg(mapping_str: str) -> ColumnMapping:
     clean = mapping_str.strip()
     if clean.startswith("{"):
         d = json.loads(clean)
+        if "label_map" in d and isinstance(d["label_map"], (dict, str)):
+            d["label_map"] = parse_label_map(d["label_map"])
         return ColumnMapping(**d)
 
     mapping = ColumnMapping()
+    last_key = None
     for pair in clean.split(","):
+        pair = pair.strip()
+        if not pair:
+            continue
         if "=" in pair:
             k, v = pair.split("=", 1)
             k, v = k.strip(), v.strip()
+            last_key = k
             if hasattr(mapping, k):
-                setattr(mapping, k, v)
+                if k == "label_map":
+                    setattr(mapping, k, parse_label_map(v))
+                else:
+                    setattr(mapping, k, v)
+            elif k in ("system_prompt", "default_system_prompt"):
+                mapping.default_system_prompt = v
+            elif k in ("label_map", "labels"):
+                mapping.label_map = parse_label_map(v)
             elif k == "prompt":
                 mapping.prompt_col = v
             elif k == "completion":
@@ -63,6 +78,12 @@ def parse_mapping_arg(mapping_str: str) -> ColumnMapping:
                 mapping.chosen_col = v
             elif k == "rejected":
                 mapping.rejected_col = v
+        elif last_key in ("label_map", "labels") and (":" in pair or "=" in pair):
+            extra = parse_label_map(pair)
+            if extra:
+                if mapping.label_map is None:
+                    mapping.label_map = {}
+                mapping.label_map.update(extra)
     return mapping
 
 
@@ -145,6 +166,9 @@ Examples:
     parser.add_argument("--system-col", type=str, help="Source column for system prompt in chat format.")
     parser.add_argument("--chosen-col", type=str, help="Source column for chosen response in DPO format.")
     parser.add_argument("--rejected-col", type=str, help="Source column for rejected response in DPO format.")
+    parser.add_argument("--system-prompt", type=str, default=None, help="Default system prompt to inject into all records (especially useful when HF dataset lacks one).")
+    parser.add_argument("--label-map", type=str, default=None, help="Semantic rewriting for target labels, e.g. '0:negative,1:neutral,2:positive'.")
+    parser.add_argument("--test-gold", action="store_true", help="Also export auxiliary test_gold.jsonl with prompt/expected schema alongside canonical test.jsonl.")
 
     # Agent & Hand-off flags
     parser.add_argument(
@@ -242,6 +266,11 @@ def run_direct_conversion(args: argparse.Namespace) -> ConversionResult:
         if args.rejected_col:
             mapping.rejected_col = args.rejected_col
 
+    if getattr(args, "system_prompt", None):
+        mapping.default_system_prompt = args.system_prompt
+    if getattr(args, "label_map", None):
+        mapping.label_map = parse_label_map(args.label_map)
+
     # Validate mapping
     errs = validate_mapping(target_format, mapping, dataset.columns)
     if errs:
@@ -267,6 +296,7 @@ def run_direct_conversion(args: argparse.Namespace) -> ConversionResult:
         output_dir=out_dir,
         split_config=split_config,
         use_existing_splits=args.keep_splits,
+        export_test_gold=getattr(args, "test_gold", False),
         manifest_file=getattr(args, "manifest_file", None),
     )
 

@@ -2288,3 +2288,123 @@ def show_choice_dialog(
         elif k in (10, 13, 32):  # Enter or Space
             return choices[sel_idx]
 
+
+def show_label_mapping_dialog(
+    stdscr: curses.window,
+    col_name: str,
+    discrete_info: Optional[Dict[str, Any]],
+    current_map: Optional[Dict[str, str]],
+) -> Optional[Dict[str, str]]:
+    """
+    Modal dialog allowing users to define semantic rewriting for discrete class labels.
+    Displays discrete values (e.g. 0, 1, 2) alongside their mapped semantic strings
+    (e.g. negative, neutral, positive).
+    Allows navigating rows, editing values, applying, or clearing to raw.
+    """
+    from mlx_commander.formats import parse_label_map
+
+    configure_escdelay(25)
+    working_map: Dict[str, str] = dict(current_map) if current_map else {}
+
+    raw_keys: List[str] = []
+    suggested = None
+    if discrete_info:
+        if discrete_info.get("unique_values"):
+            raw_keys.extend(str(v) for v in discrete_info["unique_values"])
+        suggested = discrete_info.get("suggested_map")
+
+    for k in working_map.keys():
+        if k not in raw_keys:
+            raw_keys.append(k)
+
+    if not raw_keys:
+        raw_keys = ["0", "1", "2"]
+
+    if not working_map and suggested:
+        working_map = dict(suggested)
+
+    total_actions = len(raw_keys) + 3
+    sel_idx = 0
+
+    max_y, max_x = stdscr.getmaxyx()
+    h = min(len(raw_keys) + 8, max_y - 4, 18)
+    w = min(max_x - 4, 62)
+    start_y = max(1, (max_y - h) // 2)
+    start_x = max(1, (max_x - w) // 2)
+
+    safe_curs_set(0)
+
+    while True:
+        safe_addstr(stdscr, start_y, start_x, "╔" + "═" * (w - 2) + "╗", (get_color(COLOR_BORDER_JOINTS) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
+        safe_addstr(stdscr, start_y, start_x + 2, f" Semantic Label Mapping: '{col_name}' ", (get_color(COLOR_NORMAL_TEXT) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
+        for r in range(1, h - 1):
+            safe_addstr(stdscr, start_y + r, start_x, "║" + " " * (w - 2) + "║", get_color(COLOR_BORDER_JOINTS) if safe_has_colors() else 0)
+        safe_addstr(stdscr, start_y + h - 1, start_x, "╚" + "═" * (w - 2) + "╝", (get_color(COLOR_BORDER_JOINTS) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
+
+        safe_addstr(stdscr, start_y + 1, start_x + 3, "Map discrete values to semantic labels (Enter to edit):"[:w - 6], (get_color(COLOR_LABEL_GRAY) | curses.A_DIM) if safe_has_colors() else curses.A_DIM)
+
+        list_start_y = start_y + 2
+        for i, k in enumerate(raw_keys):
+            row_y = list_start_y + i
+            if row_y >= start_y + h - 3:
+                break
+            is_foc = (sel_idx == i)
+            val = working_map.get(k, "")
+            val_disp = f"'{val}'" if val else "(keep raw)"
+            prefix = " ▶ " if is_foc else "   "
+            row_str = f"{prefix}[{k}] ──▶ {val_disp}"[: w - 6]
+            attr = (get_color(COLOR_INPUT_FOCUSED) | curses.A_BOLD) if (is_foc and safe_has_colors()) else (curses.A_STANDOUT if is_foc else (get_color(COLOR_NORMAL_TEXT) if safe_has_colors() else 0))
+            safe_addstr(stdscr, row_y, start_x + 3, row_str, attr)
+
+        btn_y = start_y + h - 3
+        save_foc = (sel_idx == len(raw_keys))
+        clear_foc = (sel_idx == len(raw_keys) + 1)
+        cancel_foc = (sel_idx == len(raw_keys) + 2)
+
+        save_attr = (get_color(COLOR_SUCCESS) | curses.A_STANDOUT) if save_foc else ((get_color(COLOR_SUCCESS) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
+        clear_attr = (get_color(COLOR_ERROR) | curses.A_STANDOUT) if clear_foc else ((get_color(COLOR_LABEL_GRAY) | curses.A_BOLD) if safe_has_colors() else curses.A_DIM)
+        cancel_attr = (get_color(COLOR_NORMAL_TEXT) | curses.A_STANDOUT) if cancel_foc else (get_color(COLOR_NORMAL_TEXT) if safe_has_colors() else 0)
+
+        safe_addstr(stdscr, btn_y, start_x + 4, "[ Save & Apply (s) ]", save_attr)
+        safe_addstr(stdscr, btn_y, start_x + 27, "[ Clear / Raw (c) ]", clear_attr)
+        safe_addstr(stdscr, btn_y, start_x + 49, "[ Cancel ]", cancel_attr)
+
+        safe_addstr(stdscr, start_y + h - 2, start_x + 3, "[Enter] Edit/Select   [s] Save   [c] Clear   [Esc] Cancel"[:w - 6], (get_color(COLOR_LABEL_GRAY) | curses.A_DIM) if safe_has_colors() else curses.A_DIM)
+        stdscr.refresh()
+
+        ch = stdscr.getch()
+        if ch in (curses.KEY_UP, ord("k")):
+            sel_idx = (sel_idx - 1) % total_actions
+        elif ch in (curses.KEY_DOWN, ord("j")):
+            sel_idx = (sel_idx + 1) % total_actions
+        elif ch in (27, ord("q"), ord("Q")):
+            return current_map
+        elif ch in (ord("s"), ord("S")):
+            filtered = {k: v.strip() for k, v in working_map.items() if v and v.strip()}
+            return filtered if filtered else None
+        elif ch in (ord("c"), ord("C")):
+            return None
+        elif ch in (10, 13, 32):  # Enter or Space
+            if sel_idx < len(raw_keys):
+                target_key = raw_keys[sel_idx]
+                curr_val = working_map.get(target_key, "")
+                new_val = show_text_edit_dialog(
+                    stdscr,
+                    f"Label Mapping for '{target_key}'",
+                    f"Enter semantic replacement text for '{target_key}' (leave blank to keep raw):",
+                    curr_val,
+                )
+                if new_val is not None:
+                    trimmed = new_val.strip()
+                    if trimmed:
+                        working_map[target_key] = trimmed
+                    elif target_key in working_map:
+                        del working_map[target_key]
+            elif sel_idx == len(raw_keys):  # Save & Apply
+                filtered = {k: v.strip() for k, v in working_map.items() if v and v.strip()}
+                return filtered if filtered else None
+            elif sel_idx == len(raw_keys) + 1:  # Clear / Raw
+                return None
+            elif sel_idx == len(raw_keys) + 2:  # Cancel
+                return current_map
+

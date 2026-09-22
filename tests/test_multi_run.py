@@ -85,6 +85,9 @@ class TestMultiRunStateAndUI(unittest.TestCase):
         self.mock_win.getmaxyx.return_value = (35, 120)
         self.temp_dir = tempfile.mkdtemp()
         self.queue_dir = Path(self.temp_dir) / "test_runs"
+        self.dataset_dir = Path(self.temp_dir) / "dataset"
+        self.dataset_dir.mkdir(parents=True, exist_ok=True)
+        (self.dataset_dir / "train.jsonl").write_text('{"text": "hi"}\n')
 
     def test_state_switch_mode_3(self):
         state = CommanderState()
@@ -179,6 +182,8 @@ class TestMultiRunStateAndUI(unittest.TestCase):
         state = CommanderState()
         state.active_tab = 2
         state.queue_manager = QueueManager(self.queue_dir)
+        state.multi_lora_config.model = "mlx-community/Llama-3.2-3B-Instruct-4bit"
+        state.multi_lora_config.data = str(self.dataset_dir)
         state.multi_lora_config.lora_rank = [4, 8]
         state.multi_lora_config.learning_rate = [1e-4, 2e-4]
 

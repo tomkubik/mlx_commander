@@ -19,9 +19,10 @@ from mlx_commander.formats import (
     auto_detect_format_and_mapping,
     auto_detect_mapping,
     format_record,
+    parse_label_map,
     validate_mapping,
 )
-from mlx_commander.loader import LoadedDataset, load_local_dataset
+from mlx_commander.loader import LoadedDataset, detect_column_discrete_labels, load_local_dataset
 from mlx_commander.splitter import (
     SplitConfig,
     calculate_split_counts,
@@ -377,6 +378,13 @@ class CommanderState:
             else:
                 self.mapping = auto
 
+            # Auto-detect discrete labels and pre-populate label_map if suggested by HF ClassLabel
+            target_col = self.mapping.completion_col or self.mapping.assistant_col
+            if target_col and not self.mapping.label_map:
+                disc = detect_column_discrete_labels(ds, target_col)
+                if disc and disc.get("suggested_map"):
+                    self.mapping.label_map = disc["suggested_map"]
+
             if not self.has_custom_output_dir:
                 self.output_dir = str(ds.default_output_dir)
             if "Merged (" in ds.source_path:
@@ -461,6 +469,7 @@ class CommanderState:
             "system_col": ["system_col", "system"],
             "chosen_col": ["chosen_col", "chosen"],
             "rejected_col": ["rejected_col", "rejected"],
+            "default_system_prompt": ["default_system_prompt", "system_prompt"],
         }
         has_custom_field = False
         for attr, aliases in map_keys.items():
@@ -469,6 +478,13 @@ class CommanderState:
                     setattr(mapping_obj, attr, str(config[alias]).strip())
                     has_custom_field = True
                     break
+
+        if "label_map" in config and config["label_map"]:
+            mapping_obj.label_map = parse_label_map(config["label_map"])
+            has_custom_field = True
+        elif "labels" in config and config["labels"]:
+            mapping_obj.label_map = parse_label_map(config["labels"])
+            has_custom_field = True
 
         # Theme prefill
         theme_val = config.get("theme") or config.get("theme_mode")
@@ -485,6 +501,9 @@ class CommanderState:
             # Switch active panel to RIGHT so user immediately sees mappings, splits, and preview
             self.active_panel = ActivePanel.RIGHT
             self.right_focus_idx = 0
+        elif custom_map or has_custom_field:
+            self.mapping = mapping_obj
+            self.update_preview()
         # Mode / Active Tab
         tab_val = config.get("active_tab") or config.get("tab") or config.get("mode")
         if tab_val is not None:
@@ -563,11 +582,22 @@ class CommanderState:
         )
         return {"train": n_train, "valid": n_valid, "test": n_test}
 
+    def get_discrete_labels_for_target(self) -> Optional[Dict[str, Any]]:
+        """Return discrete label info for the current completion or assistant column."""
+        if not self.loaded_dataset:
+            return None
+        target_col = self.mapping.completion_col or self.mapping.assistant_col
+        if not target_col:
+            return None
+        return detect_column_discrete_labels(self.loaded_dataset, target_col)
+
     def get_mapping_fields_for_format(self) -> List[Dict[str, Any]]:
         """Return the column fields relevant to the current format."""
         cols = self.loaded_dataset.columns if self.loaded_dataset else []
+        fields: List[Dict[str, Any]] = []
+
         if self.target_format == MLXFormat.TEXT:
-            return [
+            fields = [
                 {
                     "key": "text_col",
                     "label": "Text Column",
@@ -582,7 +612,7 @@ class CommanderState:
                 },
             ]
         elif self.target_format == MLXFormat.PROMPT_COMPLETION:
-            return [
+            fields = [
                 {
                     "key": "prompt_col",
                     "label": "Prompt / Question",
@@ -598,7 +628,7 @@ class CommanderState:
             ]
         elif self.target_format == MLXFormat.CHAT:
             if self.mapping.messages_col:
-                return [
+                fields = [
                     {
                         "key": "messages_col",
                         "label": "Messages List Col",
@@ -607,7 +637,7 @@ class CommanderState:
                     },
                 ]
             else:
-                return [
+                fields = [
                     {
                         "key": "user_col",
                         "label": "User Turn Col",
@@ -628,7 +658,7 @@ class CommanderState:
                     },
                 ]
         elif self.target_format == MLXFormat.DPO:
-            return [
+            fields = [
                 {
                     "key": "prompt_col",
                     "label": "Prompt Col",
@@ -648,7 +678,40 @@ class CommanderState:
                     "help": "Dispreferred response",
                 },
             ]
-        return []
+
+        # System Prompt Field (available for all formats)
+        sys_p = self.mapping.default_system_prompt
+        sys_disp = (sys_p[:14] + "…") if sys_p and len(sys_p) > 15 else (sys_p or "<None>")
+        fields.append({
+            "key": "default_system_prompt",
+            "label": "System Prompt",
+            "current": sys_disp,
+            "full_value": sys_p,
+            "help": "Optional system prompt prepended/injected into all records",
+            "is_system_prompt": True,
+        })
+
+        # Label Mapping Field (for formats with target/completion/assistant)
+        if self.target_format in (MLXFormat.PROMPT_COMPLETION, MLXFormat.CHAT, MLXFormat.DPO):
+            label_count = len(self.mapping.label_map) if self.mapping.label_map else 0
+            if label_count > 0:
+                label_disp = f"{label_count} mapped"
+            else:
+                disc = self.get_discrete_labels_for_target()
+                if disc and disc.get("unique_values"):
+                    label_disp = f"{len(disc['unique_values'])} discrete"
+                else:
+                    label_disp = "<None>"
+
+            fields.append({
+                "key": "label_map",
+                "label": "Label Mapping",
+                "current": label_disp,
+                "help": "Map discrete labels (e.g. 0->negative, 1->neutral, 2->positive)",
+                "is_label_map": True,
+            })
+
+        return fields
 
     def set_mapping_field(self, key: str, value: Optional[str]) -> None:
         """Update a specific mapping field and refresh preview."""

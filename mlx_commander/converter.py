@@ -80,6 +80,7 @@ def convert_and_save(
     output_dir: Optional[Union[str, Path]] = None,
     split_config: Optional[SplitConfig] = None,
     use_existing_splits: bool = False,
+    export_test_gold: bool = False,
     progress_callback: Optional[Callable[[str, int, int], None]] = None,
     output_dir_str: Optional[Union[str, Path]] = None,
     **kwargs: Any,
@@ -88,6 +89,9 @@ def convert_and_save(
     Convert a loaded dataset to MLX JSONL format and write output files.
     Supports output_dir as str or Path, as well as output_dir_str for backward compatibility.
     """
+    if kwargs.get("export_test_gold") or kwargs.get("test_gold"):
+        export_test_gold = True
+
     target = output_dir if output_dir is not None else output_dir_str
     if target is None:
         target = kwargs.get("output_path")
@@ -160,6 +164,40 @@ def convert_and_save(
         record_counts[split_name] = written_count
         file_sizes[split_name] = target_path.stat().st_size
         samples[split_name] = split_samples
+
+    # Optionally write auxiliary test_gold.jsonl for third-party eval tools
+    if export_test_gold and "test" in splits_data and splits_data["test"]:
+        gold_path = output_dir / "test_gold.jsonl"
+        gold_written = 0
+        with open(gold_path, "w", encoding="utf-8") as gf:
+            for raw_record in splits_data["test"]:
+                formatted = format_record(raw_record, format_type, mapping)
+                if format_type == MLXFormat.CHAT and "messages" in formatted and formatted["messages"]:
+                    msgs = formatted["messages"]
+                    gold_row = {
+                        "prompt": msgs[:-1],
+                        "expected": msgs[-1].get("content", "") if msgs else "",
+                    }
+                elif format_type == MLXFormat.PROMPT_COMPLETION:
+                    gold_row = {
+                        "prompt": formatted.get("prompt", ""),
+                        "expected": formatted.get("completion", ""),
+                    }
+                elif format_type == MLXFormat.DPO:
+                    gold_row = {
+                        "prompt": formatted.get("prompt", ""),
+                        "expected": formatted.get("chosen", ""),
+                    }
+                else:
+                    gold_row = {
+                        "text": formatted.get("text", ""),
+                    }
+                gf.write(json.dumps(gold_row, ensure_ascii=False) + "\n")
+                gold_written += 1
+
+        output_files["test_gold"] = gold_path
+        record_counts["test_gold"] = gold_written
+        file_sizes["test_gold"] = gold_path.stat().st_size
 
     res = ConversionResult(
         output_dir=output_dir,
