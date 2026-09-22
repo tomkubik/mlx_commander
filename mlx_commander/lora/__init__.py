@@ -13,6 +13,7 @@ from .config import (
     generate_hyperparameters_slug,
     sanitize_model_slug,
 )
+from .multi_config import MultiLoraRunConfig, SWEEP_FIELD_DEFS
 from .estimator import (
     calculate_implied_epochs,
     estimate_duration,
@@ -36,6 +37,8 @@ from .tracking import (
 
 __all__ = [
     "LoraRunConfig",
+    "MultiLoraRunConfig",
+    "SWEEP_FIELD_DEFS",
     "QueueManager",
     "rename_saved_adapters",
     "run_lora_queue",

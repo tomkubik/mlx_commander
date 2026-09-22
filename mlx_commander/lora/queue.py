@@ -56,8 +56,14 @@ class QueueManager:
                 f.write(r.to_mlx_yaml())
             r.log_file = str(self.logs_dir / f"{r.id}.log")
 
+        try:
+            from mlx_commander import __version__
+            ver = __version__
+        except Exception:
+            ver = "0.4.0"
+
         data = {
-            "version": "0.3.24",
+            "version": ver,
             "queue_dir": str(self.queue_dir),
             "runs": [r.to_dict() for r in self.runs],
         }

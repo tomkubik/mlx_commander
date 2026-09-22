@@ -227,7 +227,7 @@ class TestLoraUI(unittest.TestCase):
             "Grad Checkpoint",
             "Mask Prompt",
             "Save Every",
-            "Steps per Eval",
+            'Steps per "Eval" (validation loss)',
             "Adapter Path",
             "+ Add to Queue (F6)",
         ]

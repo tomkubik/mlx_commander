@@ -1146,12 +1146,22 @@ class TestCommanderUI(unittest.TestCase):
         mock_pick_folder.assert_not_called()
         mock_pick_model.assert_not_called()
 
-        # Mode 2 -> switches to Mode 1
+        # Tab 1 -> switches to Tab 2 (Multi-Run)
         state2 = CommanderState()
         state2.active_tab = 1
         self.mock_win.getch.side_effect = [curses.KEY_F2, ord("q")]
         run_commander_tui(self.mock_win, initial_state=state2)
-        self.assertEqual(state2.active_tab, 0)
+        self.assertEqual(state2.active_tab, 2)
+        mock_pick_data.assert_not_called()
+        mock_pick_folder.assert_not_called()
+        mock_pick_model.assert_not_called()
+
+        # Tab 2 -> cycles back to Tab 0 (Dataset Converter)
+        state3 = CommanderState()
+        state3.active_tab = 2
+        self.mock_win.getch.side_effect = [curses.KEY_F2, ord("q")]
+        run_commander_tui(self.mock_win, initial_state=state3)
+        self.assertEqual(state3.active_tab, 0)
         mock_pick_data.assert_not_called()
         mock_pick_folder.assert_not_called()
         mock_pick_model.assert_not_called()

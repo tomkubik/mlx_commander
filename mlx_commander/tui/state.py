@@ -28,6 +28,7 @@ from mlx_commander.splitter import (
 )
 from mlx_commander.lora import (
     LoraRunConfig,
+    MultiLoraRunConfig,
     ModelMetadata,
     QueueManager,
     calculate_implied_epochs,
@@ -94,11 +95,11 @@ class CommanderState:
     preview_error: Optional[str] = None
 
     # Screen / Mode Navigation
-    active_tab: int = 0  # 0: Dataset Conversion, 1: Fine-Tuning Single Run
+    active_tab: int = 0  # 0: Dataset Conversion, 1: Fine-Tuning Single Run, 2: Fine-Tuning Multi-Run
     mode_switcher_focused: bool = False
     mode_switcher_idx: int = 0
 
-    # LoRA Fine-Tuning State
+    # LoRA Fine-Tuning Single Run State
     lora_config: LoraRunConfig = field(default_factory=LoraRunConfig)
     queue_manager: Optional[QueueManager] = None
     selected_queue_idx: int = 0
@@ -108,6 +109,13 @@ class CommanderState:
     lora_right_scroll_offset: int = 0
     lora_queue_scroll_offset: int = 0
     current_model_metadata: Optional[ModelMetadata] = None
+
+    # LoRA Fine-Tuning Multi-Run Sweep State
+    multi_lora_config: MultiLoraRunConfig = field(default_factory=MultiLoraRunConfig)
+    multi_active_panel: str = "left"  # "left", "right", "sweep"
+    multi_left_focus_idx: int = 0   # 0: Model, 1: Dataset, 2: Method, 3: Optim, 4: Mode
+    multi_right_focus_idx: int = 0  # 0 to 12
+    multi_right_scroll_offset: int = 0
 
     # Weights & Biases Experiment Tracking State
     wandb_enabled: bool = True
@@ -241,14 +249,26 @@ class CommanderState:
         self._cached_dur_estimate = est
         return est
 
+    def get_multi_sweep_estimates(self) -> Dict[str, Any]:
+        """Calculate aggregated runtime estimates for the multi-run sweep."""
+        train_count = self.get_train_record_count()
+        return self.multi_lora_config.calculate_sweep_estimates(
+            dataset_records=train_count,
+        )
+
     def sync_dataset_to_lora(self) -> None:
         """Pre-populate the LoRA dataset directory from the active conversion target or source."""
+        target = None
         if self.output_dir and (Path(self.output_dir) / "train.jsonl").exists():
-            self.lora_config.data = str(self.output_dir)
+            target = str(self.output_dir)
         elif self.output_dir:
-            self.lora_config.data = str(self.output_dir)
+            target = str(self.output_dir)
         elif self.dataset_path:
-            self.lora_config.data = str(self.dataset_path)
+            target = str(self.dataset_path)
+
+        if target:
+            self.lora_config.data = target
+            self.multi_lora_config.data = target
 
     def switch_mode(self, target_tab: int) -> None:
         """Switch active mode tab and synchronize dependent state."""
@@ -257,9 +277,29 @@ class CommanderState:
             if self.active_tab == 1:
                 self.sync_dataset_to_lora()
                 self.status_message = "Switched to Fine-Tuning Single Run Mode."
+            elif self.active_tab == 2:
+                self.sync_dataset_to_lora()
+                self.multi_lora_config.model = self.lora_config.model
+                self.multi_lora_config.fine_tune_type = self.lora_config.fine_tune_type
+                self.multi_lora_config.optimizer = self.lora_config.optimizer
+                self.status_message = "Switched to Fine-Tuning Multi-Run Mode."
             else:
                 self.status_message = "Switched to Dataset Conversion Mode."
             self.status_is_error = False
+
+    def add_multi_lora_runs_to_queue(self) -> List[LoraRunConfig]:
+        """Generate all combinations from multi_lora_config and add to queue."""
+        if not self.queue_manager:
+            self.queue_manager = QueueManager(Path.cwd() / "mlx_runs")
+        runs = self.multi_lora_config.generate_runs()
+        added_runs = []
+        for r in runs:
+            r.wandb_project = self.wandb_project
+            added = self.queue_manager.add_run(r)
+            added_runs.append(added)
+        if self.queue_manager.runs:
+            self.selected_queue_idx = len(self.queue_manager.runs) - 1
+        return added_runs
 
     def add_current_lora_to_queue(self) -> LoraRunConfig:
         """Add current form config as a new run in the queue."""
@@ -437,11 +477,12 @@ class CommanderState:
         # Mode / Active Tab
         tab_val = config.get("active_tab") or config.get("tab") or config.get("mode")
         if tab_val is not None:
-            if str(tab_val).lower().strip() in ("1", "lora", "fine_tune", "finetune"):
-                self.active_tab = 1
-                self.sync_dataset_to_lora()
+            if str(tab_val).lower().strip() in ("2", "multi", "multi_run", "multirun", "sweep"):
+                self.switch_mode(2)
+            elif str(tab_val).lower().strip() in ("1", "lora", "fine_tune", "finetune", "single"):
+                self.switch_mode(1)
             elif str(tab_val).lower().strip() in ("0", "dataset", "convert"):
-                self.active_tab = 0
+                self.switch_mode(0)
 
         # Weights & Biases Tracking
         if "wandb_enabled" in config:

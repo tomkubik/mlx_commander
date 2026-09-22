@@ -38,7 +38,9 @@ from mlx_commander.lora import (
     OPTIMIZERS,
     POPULAR_MLX_MODELS,
     LoraRunConfig,
+    MultiLoraRunConfig,
     QueueManager,
+    SWEEP_FIELD_DEFS,
 )
 from mlx_commander.terminal_spawner import is_macos, spawn_lora_queue_terminal
 from mlx_commander.tui.state import ActivePanel, CommanderState, ThemeMode
@@ -62,8 +64,10 @@ from mlx_commander.tui.widgets import (
     draw_footer,
     draw_header,
     draw_mapping_pipeline_panel,
+    draw_multi_field,
     draw_queue_table,
     draw_radio,
+    draw_sweep_grid,
     get_color,
     safe_addstr,
     show_choice_dialog,
@@ -75,6 +79,7 @@ from mlx_commander.tui.widgets import (
     show_message_dialog,
     show_missing_dependency_dialog,
     show_model_picker_dialog,
+    show_multi_value_edit_dialog,
     show_output_destination_dialog,
     show_results_dialog,
     show_text_edit_dialog,
@@ -681,7 +686,7 @@ def _draw_mode2_dashboard(
         (8, "Grad Checkpoint", "True" if cfg.grad_checkpoint else "False", 10, False),
         (9, "Mask Prompt", "True" if cfg.mask_prompt else "False", 10, False),
         (10, "Save Every", str(cfg.save_every), 8, False),
-        (11, "Steps per Eval", str(cfg.steps_per_eval), 8, False),
+        (11, 'Steps per "Eval" (validation loss)', str(cfg.steps_per_eval), 8, False),
         (12, "Adapter Path", cfg.adapter_path, max(14, right_w - 20), False),
         (13, "+ Add to Queue (F6)", "", 0, True),
     ]
@@ -805,6 +810,235 @@ def _draw_mode2_dashboard(
         selected_idx=state.selected_queue_idx,
         is_focused=is_lora_queue,
         scroll_offset=state.lora_queue_scroll_offset,
+    )
+
+
+def _draw_mode3_dashboard(
+    stdscr: curses.window,
+    state: CommanderState,
+    max_y: int,
+    max_x: int,
+    left_w: int,
+    right_w: int,
+) -> None:
+    """Draw Mode 3: Apple MLX LoRA Fine-Tuning Multi-Run Dashboard & Sweep Grid."""
+    if max_y >= 30:
+        panel_h = 19
+        vis_h = 6
+    elif max_y >= 28:
+        vis_h = 5
+        panel_h = min(19, max_y - 5 - vis_h)
+    elif max_y >= 25:
+        vis_h = 4
+        panel_h = max(12, max_y - 5 - vis_h)
+    else:
+        vis_h = 4
+        panel_h = max(10, max_y - 9)
+
+    vis_y = panel_h + 1
+    sweep_y = vis_y + vis_h
+    sweep_h = max(3, max_y - 1 - sweep_y)
+
+    is_multi_left = (state.multi_active_panel == "left" and not state.mode_switcher_focused)
+    is_multi_right = (state.multi_active_panel == "right" and not state.mode_switcher_focused)
+    is_multi_sweep = (state.multi_active_panel == "sweep" and not state.mode_switcher_focused)
+
+    # 1. Left Panel: Model & Dataset Selector (identical setup to Mode 2)
+    left_right_edge = left_w - 3
+    draw_box_panel(
+        stdscr,
+        1,
+        0,
+        panel_h,
+        left_w,
+        "Model & Dataset Selector (LoRA Base)",
+        is_focused=is_multi_left,
+        subtitle="Step 1: Setup",
+    )
+
+    # Field 0: Base Model
+    m_focus = is_multi_left and state.multi_left_focus_idx == 0
+    model_disp = state.multi_lora_config.model or "None"
+    if len(model_disp) > left_w - 18:
+        model_disp = "…" + model_disp[-(left_w - 19):]
+    draw_field(stdscr, 2, 2, "Base Model", model_disp, is_focused=m_focus, val_width=max(14, left_w - 18), has_dropdown=True, right_edge=left_right_edge)
+
+    # Field 1: Dataset Directory
+    d_focus = is_multi_left and state.multi_left_focus_idx == 1
+    data_disp = state.multi_lora_config.data or "None"
+    if len(data_disp) > left_w - 18:
+        data_disp = "…" + data_disp[-(left_w - 19):]
+    draw_field(stdscr, 4, 2, "Dataset", data_disp, is_focused=d_focus, val_width=max(14, left_w - 18), has_dropdown=True, right_edge=left_right_edge)
+
+    # Field 2: Technique
+    type_focus = is_multi_left and state.multi_left_focus_idx == 2
+    draw_field(stdscr, 6, 2, "Method", state.multi_lora_config.fine_tune_type.upper(), is_focused=type_focus, val_width=10, has_dropdown=True, right_edge=left_right_edge)
+
+    # Field 3: Optimizer
+    opt_focus = is_multi_left and state.multi_left_focus_idx == 3
+    draw_field(stdscr, 7, 2, "Optimizer", state.multi_lora_config.optimizer, is_focused=opt_focus, val_width=12, has_dropdown=True, right_edge=left_right_edge)
+
+    # Field 4: Mode (Train / Test)
+    mode_focus = is_multi_left and state.multi_left_focus_idx == 4
+    mode_str = f"Train: {'Yes' if state.multi_lora_config.train else 'No'}  Test: {'Yes' if state.multi_lora_config.test else 'No'}"
+    draw_field(stdscr, 8, 2, "Mode", mode_str, is_focused=mode_focus, val_width=22, right_edge=left_right_edge)
+
+    # Field 5: Adapter Base Path
+    adp_focus = is_multi_left and state.multi_left_focus_idx == 5
+    adp_disp = state.multi_lora_config.adapter_path or "adapters"
+    if len(adp_disp) > left_w - 18:
+        adp_disp = "…" + adp_disp[-(left_w - 19):]
+    draw_field(stdscr, 9, 2, "Adapters Dir", adp_disp, is_focused=adp_focus, val_width=max(14, left_w - 18), right_edge=left_right_edge)
+
+    # 2. Right Panel: Multi-Run LoRA Hyperparameters
+    wb = state.get_wandb_status()
+    if wb["enabled"]:
+        wb_badge = f"W&B: @{wb.get('entity') or 'active'} ({wb.get('project')})"
+    elif wb["available"]:
+        wb_badge = "W&B: Not Logged In"
+    else:
+        wb_badge = "W&B: Offline"
+
+    draw_box_panel(
+        stdscr,
+        1,
+        left_w,
+        panel_h,
+        right_w,
+        "LoRA Hyperparameters (Multi-Run)",
+        is_focused=is_multi_right,
+        subtitle="Step 2: Conditions",
+    )
+
+    right_edge = max_x - 3
+    cfg = state.multi_lora_config
+
+    white_unbold = get_color(COLOR_NORMAL_TEXT) if curses.has_colors() else 0
+    field_start_y = 2
+    inner_h = max(1, panel_h - 2)
+
+    # Multi-field definitions: (field_num, label, values_list, val_type, is_btn)
+    multi_fields_def = [
+        (0, "Training Iterations", cfg.iters, int, False),
+        (1, "Batch Size", cfg.batch_size, int, False),
+        (2, "Learning Rate", cfg.learning_rate, float, False),
+        (3, "LoRA Rank (r)", cfg.lora_rank, int, False),
+        (4, "LoRA Alpha (α)", cfg.lora_alpha, float, False),
+        (5, "LoRA Dropout", cfg.lora_dropout, float, False),
+        (6, "Max Seq Length", cfg.max_seq_length, int, False),
+        (7, "Fine-Tuned Layers", cfg.num_layers, int, False),
+        (8, "Grad Checkpoint", cfg.grad_checkpoint, bool, False),
+        (9, "Mask Prompt", cfg.mask_prompt, bool, False),
+        (10, "Save Every", cfg.save_every, int, False),
+        (11, 'Steps per "Eval" (validation loss)', cfg.steps_per_eval, int, False),
+        (12, "+ Add Sweep to Queue (F6)", [], None, True),
+    ]
+
+    # Handle smooth scrolling in right panel
+    if state.multi_right_focus_idx < state.multi_right_scroll_offset:
+        state.multi_right_scroll_offset = state.multi_right_focus_idx
+    elif state.multi_right_focus_idx >= state.multi_right_scroll_offset + inner_h:
+        state.multi_right_scroll_offset = state.multi_right_focus_idx - inner_h + 1
+    scroll_off = state.multi_right_scroll_offset
+
+    for idx_in_view in range(min(inner_h, len(multi_fields_def) - scroll_off)):
+        f_idx = scroll_off + idx_in_view
+        f_num, f_label, f_vals, f_type, is_btn = multi_fields_def[f_idx]
+        f_y = field_start_y + idx_in_view
+        is_foc = is_multi_right and (state.multi_right_focus_idx == f_num)
+
+        if is_btn:
+            btn_str = "+ Add Sweep to Queue (F6)"
+            btn_w = len(btn_str) + 4
+            draw_button(stdscr, f_y, right_edge - btn_w + 1, btn_str, is_focused=is_foc)
+        else:
+            draw_multi_field(stdscr, f_y, left_w + 2, f_label, f_vals, is_focused=is_foc, right_edge=right_edge)
+
+    # Visual scroll indicators
+    if scroll_off > 0:
+        safe_addstr(stdscr, field_start_y - 1, max_x - 4, "▲", (get_color(COLOR_TITLE_ACCENT) | curses.A_BOLD) if curses.has_colors() else curses.A_BOLD)
+    if scroll_off + inner_h < len(multi_fields_def):
+        safe_addstr(stdscr, panel_h, max_x - 4, "▼", (get_color(COLOR_TITLE_ACCENT) | curses.A_BOLD) if curses.has_colors() else curses.A_BOLD)
+
+    # 3. Middle Panel: Runtime Estimates (Aggregated across all runs in sweep)
+    draw_box_panel(
+        stdscr,
+        vis_y,
+        0,
+        vis_h,
+        max_x,
+        "Runtime Estimates (Sweep Aggregated)",
+        is_focused=False,
+        subtitle=wb_badge,
+    )
+
+    sweep_est = state.get_multi_sweep_estimates()
+    total_runs = sweep_est.get("total_runs", cfg.total_runs_count)
+    min_epochs = sweep_est.get("min_implied_epochs")
+    max_ram_gb = sweep_est.get("max_peak_ram_gb", 0)
+    total_ram = sweep_est.get("total_ram_gb", 16)
+    safety_lvl = sweep_est.get("safety_level", "SAFE")
+    dur_str = sweep_est.get("total_duration_str", "0s")
+
+    gray_unbold = (get_color(COLOR_LABEL_GRAY) | curses.A_DIM) if curses.has_colors() else curses.A_DIM
+
+    # Row 1: Implied Epochs (Minimum across all sweep conditions, highlighted in dark red if < 1.0)
+    if min_epochs is not None:
+        lbl_part = f"• Min Implied Epochs: {min_epochs:.2f} epochs"
+        calc_part = f"  (minimum across all {total_runs} scheduled runs; < 1.0 indicates incomplete dataset pass)"
+        epoch_attr = (get_color(COLOR_ERROR) if curses.has_colors() else 0) if min_epochs < 1.0 else white_unbold
+        safe_addstr(stdscr, vis_y + 1, 2, lbl_part[:max_x - 4], epoch_attr)
+        if len(lbl_part) + 2 < max_x - 4:
+            safe_addstr(stdscr, vis_y + 1, 2 + len(lbl_part), calc_part[:max_x - 4 - len(lbl_part)], gray_unbold)
+    else:
+        lbl_part = "• Min Implied Epochs: "
+        calc_part = "(Select dataset to calculate implied epochs across sweep runs)"
+        safe_addstr(stdscr, vis_y + 1, 2, lbl_part[:max_x - 4], white_unbold)
+        if len(lbl_part) + 2 < max_x - 4:
+            safe_addstr(stdscr, vis_y + 1, 2 + len(lbl_part), calc_part[:max_x - 4 - len(lbl_part)], gray_unbold)
+
+    # Row 2: Maximum Peak Unified RAM across sweep
+    if safety_lvl == "SAFE":
+        lvl_attr = get_color(COLOR_SUCCESS) if curses.has_colors() else 0
+        desc = "Safe fine-tuning headroom for all runs"
+    elif safety_lvl == "TIGHT":
+        lvl_attr = get_color(COLOR_TITLE_ACCENT) if curses.has_colors() else 0
+        desc = "Close background apps; high RAM condition present"
+    else:
+        lvl_attr = get_color(COLOR_ERROR) if curses.has_colors() else 0
+        desc = "Reduce batch size or enable grad checkpoint in large-rank conditions"
+
+    pct = int(round((max_ram_gb / max(1, total_ram)) * 100))
+    ram_main = f"• Max Peak Unified RAM: {max_ram_gb} GB / {total_ram} GB ({pct}%)  [{safety_lvl}]"
+    ram_desc = f"  ({desc})"
+    safe_addstr(stdscr, vis_y + 2, 2, ram_main[:max_x - 4], lvl_attr)
+    if len(ram_main) + 2 < max_x - 4:
+        safe_addstr(stdscr, vis_y + 2, 2 + len(ram_main), ram_desc[:max_x - 4 - len(ram_main)], gray_unbold)
+
+    # Row 3: Total Sweep Duration
+    dur_line = f"• Total Sweep Duration: {dur_str}  ({total_runs} runs scheduled sequentially)"
+    safe_addstr(stdscr, vis_y + 3, 2, dur_line[:max_x - 4], white_unbold)
+
+    # 4. Bottom Panel: Cartesian Multi-Run Sweep Grid
+    varying = cfg.get_varying_hyperparameters()
+    draw_box_panel(
+        stdscr,
+        sweep_y,
+        0,
+        sweep_h,
+        max_x,
+        "Multi-Run Parameter Sweep",
+        is_focused=is_multi_sweep,
+        subtitle=f"{total_runs} run(s) scheduled │ F5: Run Sweep │ F6: Add to Queue │ Tab: Switch Panels",
+    )
+    draw_sweep_grid(
+        stdscr,
+        sweep_y + 1,
+        2,
+        sweep_h - 2,
+        max_x - 4,
+        varying,
+        total_runs,
     )
 
 
@@ -1121,7 +1355,7 @@ def _handle_mode2_input(
                     try: state.lora_config.save_every = max(1, int(val))
                     except ValueError: pass
             elif idx == 11:  # Steps per eval
-                val = show_text_edit_dialog(stdscr, "Steps per Eval", "Evaluate on validation split every N steps:", str(state.lora_config.steps_per_eval), is_number=True)
+                val = show_text_edit_dialog(stdscr, 'Steps per "Eval" (validation loss)', "Evaluate on validation split every N steps:", str(state.lora_config.steps_per_eval), is_number=True)
                 if val:
                     try: state.lora_config.steps_per_eval = max(1, int(val))
                     except ValueError: pass
@@ -1176,6 +1410,116 @@ def _handle_mode2_input(
                 state.load_queue_run_into_form(curr_r.id)
                 state.status_message = f"Loaded run '{curr_r.name}' into form editor."
                 state.status_is_error = False
+
+
+def _handle_mode3_input(
+    stdscr: curses.window,
+    state: CommanderState,
+    key: int,
+) -> None:
+    """Handle keyboard input specific to Mode 3 (Multi-Run LoRA Fine-Tuning Sweep)."""
+    if key in (9,):  # Tab
+        if state.multi_active_panel == "left":
+            state.multi_active_panel = "right"
+        elif state.multi_active_panel == "right":
+            state.multi_active_panel = "sweep"
+        else:
+            state.multi_active_panel = "left"
+    elif key in (curses.KEY_BTAB,):  # Shift-Tab
+        if state.multi_active_panel == "left":
+            state.multi_active_panel = "sweep"
+        elif state.multi_active_panel == "sweep":
+            state.multi_active_panel = "right"
+        else:
+            state.multi_active_panel = "left"
+
+    # Navigation in Left Panel (Setup)
+    elif state.multi_active_panel == "left":
+        if key in (curses.KEY_UP, ord("k")):
+            if state.multi_left_focus_idx == 0:
+                state.mode_switcher_focused = True
+                state.mode_switcher_idx = state.active_tab
+                state.status_message = "Mode Switcher: Use [←/→] to select mode, [Enter] to switch, [↓] to return to pane."
+                state.status_is_error = False
+            else:
+                state.multi_left_focus_idx -= 1
+        elif key in (curses.KEY_DOWN, ord("j")):
+            state.multi_left_focus_idx = min(5, state.multi_left_focus_idx + 1)
+        elif key in (curses.KEY_RIGHT, ord("l")):
+            state.multi_active_panel = "right"
+        elif key in (10, 13, curses.KEY_ENTER, 32):  # Enter or Space
+            idx = state.multi_left_focus_idx
+            if idx == 0:  # Base Model
+                chosen = show_model_picker_dialog(stdscr, state.multi_lora_config.model)
+                if chosen:
+                    state.multi_lora_config.model = chosen.strip()
+                    state.lora_config.model = chosen.strip()
+                    state.inspect_current_model()
+                    state.status_message = f"Base model set to: {state.multi_lora_config.model}"
+                    state.status_is_error = False
+            elif idx == 1:  # Dataset
+                chosen = show_dataset_picker_dialog(stdscr, state.multi_lora_config.data)
+                if chosen:
+                    state.multi_lora_config.data = chosen.strip()
+                    state.lora_config.data = chosen.strip()
+                    state.status_message = f"Dataset folder set to: {chosen.strip()}"
+                    state.status_is_error = False
+            elif idx == 2:  # Method
+                chosen = show_choice_dialog(stdscr, "Fine-Tune Method", "Select technique:", FINE_TUNE_TYPES, state.multi_lora_config.fine_tune_type)
+                if chosen:
+                    state.multi_lora_config.fine_tune_type = chosen
+                    state.lora_config.fine_tune_type = chosen
+            elif idx == 3:  # Optimizer
+                chosen = show_choice_dialog(stdscr, "Optimizer", "Select training optimizer:", OPTIMIZERS, state.multi_lora_config.optimizer)
+                if chosen:
+                    state.multi_lora_config.optimizer = chosen
+                    state.lora_config.optimizer = chosen
+            elif idx == 4:  # Mode (toggle train/test)
+                state.multi_lora_config.train = not state.multi_lora_config.train
+            elif idx == 5:  # Adapters dir
+                val = show_text_edit_dialog(stdscr, "Adapters Directory", "Base directory for saved adapter weights:", default_val=state.multi_lora_config.adapter_path)
+                if val:
+                    state.multi_lora_config.adapter_path = val.strip()
+
+    # Navigation in Right Panel (Multi-Run Hyperparameters)
+    elif state.multi_active_panel == "right":
+        if key in (curses.KEY_UP, ord("k")):
+            state.multi_right_focus_idx = max(0, state.multi_right_focus_idx - 1)
+        elif key in (curses.KEY_DOWN, ord("j")):
+            state.multi_right_focus_idx = min(12, state.multi_right_focus_idx + 1)
+        elif key in (curses.KEY_LEFT, ord("h")):
+            state.multi_active_panel = "left"
+        elif key in (10, 13, curses.KEY_ENTER, 32):  # Enter or Space
+            idx = state.multi_right_focus_idx
+            if idx < 12:
+                field_name, field_label, field_type = SWEEP_FIELD_DEFS[idx]
+                curr_vals = state.multi_lora_config.get_field_values(field_name)
+                chosen_vals = show_multi_value_edit_dialog(
+                    stdscr,
+                    title=f"Edit {field_label}",
+                    prompt=f"Enter conditions for {field_label}:",
+                    current_values=curr_vals,
+                    val_type=field_type,
+                )
+                if chosen_vals:
+                    state.multi_lora_config.set_field_values(field_name, chosen_vals)
+                    state.status_message = f"Updated {field_label} conditions: {chosen_vals}"
+                    state.status_is_error = False
+            elif idx == 12:  # Add sweep to queue
+                added = state.add_multi_lora_runs_to_queue()
+                state.status_message = f"Added {len(added)} sweep run(s) to queue ({len(state.queue_manager.runs)} total queued)."
+                state.status_is_error = False
+
+    # Navigation in Bottom Sweep Panel
+    elif state.multi_active_panel == "sweep":
+        if key in (curses.KEY_UP, ord("k")):
+            state.multi_active_panel = "right"
+        elif key in (curses.KEY_DOWN, ord("j")):
+            pass
+        elif key in (10, 13, curses.KEY_ENTER, 32):  # Add sweep to queue
+            added = state.add_multi_lora_runs_to_queue()
+            state.status_message = f"Added {len(added)} sweep run(s) to queue ({len(state.queue_manager.runs)} total queued)."
+            state.status_is_error = False
 
 
 def run_commander_tui(
@@ -1252,7 +1596,7 @@ def run_commander_tui(
             continue
 
         # ----------------------------------------------------
-        # 1. Header Banner with Dual Mode Switcher Tabs
+        # 1. Header Banner with Mode Switcher Tabs
         # ----------------------------------------------------
         hdr_attr = (get_color(COLOR_BANNER) | curses.A_BOLD) if curses.has_colors() else curses.A_STANDOUT
         safe_addstr(stdscr, 0, 0, " " * max_x, hdr_attr)
@@ -1263,6 +1607,7 @@ def run_commander_tui(
 
         mode1_title = "[ 1: Dataset Converter ]"
         mode2_title = "[ 2: Fine-Tuning Single Run ]"
+        mode3_title = "[ 3: Fine-Tuning Multi-Run ]"
         if state.mode_switcher_focused:
             focused_attr = (get_color(COLOR_INPUT_FOCUSED) | curses.A_BOLD) if curses.has_colors() else (curses.A_STANDOUT | curses.A_BOLD)
             active_attr = hdr_attr | curses.A_STANDOUT | curses.A_BOLD
@@ -1270,21 +1615,21 @@ def run_commander_tui(
 
             m1_attr = focused_attr if state.mode_switcher_idx == 0 else (active_attr if state.active_tab == 0 else dim_attr)
             m2_attr = focused_attr if state.mode_switcher_idx == 1 else (active_attr if state.active_tab == 1 else dim_attr)
+            m3_attr = focused_attr if state.mode_switcher_idx == 2 else (active_attr if state.active_tab == 2 else dim_attr)
         else:
-            if state.active_tab == 0:
-                m1_attr = hdr_attr | curses.A_STANDOUT | curses.A_BOLD
-                m2_attr = hdr_attr | curses.A_DIM
-            else:
-                m1_attr = hdr_attr | curses.A_DIM
-                m2_attr = hdr_attr | curses.A_STANDOUT | curses.A_BOLD
+            m1_attr = (hdr_attr | curses.A_STANDOUT | curses.A_BOLD) if state.active_tab == 0 else (hdr_attr | curses.A_DIM)
+            m2_attr = (hdr_attr | curses.A_STANDOUT | curses.A_BOLD) if state.active_tab == 1 else (hdr_attr | curses.A_DIM)
+            m3_attr = (hdr_attr | curses.A_STANDOUT | curses.A_BOLD) if state.active_tab == 2 else (hdr_attr | curses.A_DIM)
 
         safe_addstr(stdscr, 0, x_m1, mode1_title, m1_attr)
         x_m2 = x_m1 + len(mode1_title) + 2
         safe_addstr(stdscr, 0, x_m2, mode2_title, m2_attr)
+        x_m3 = x_m2 + len(mode2_title) + 2
+        safe_addstr(stdscr, 0, x_m3, mode3_title, m3_attr)
 
         if state.mode_switcher_focused:
             hint = "Navigate: [←/→]  Confirm: [Enter]  Return: [↓]"
-            if max_x >= x_m2 + len(mode2_title) + len(hint) + 3:
+            if max_x >= x_m3 + len(mode3_title) + len(hint) + 3:
                 safe_addstr(stdscr, 0, max_x - len(hint) - 2, hint, (get_color(COLOR_TITLE_ACCENT) | curses.A_BOLD) if curses.has_colors() else curses.A_BOLD)
 
         # ----------------------------------------------------
@@ -1295,8 +1640,10 @@ def run_commander_tui(
 
         if state.active_tab == 0:
             _draw_mode1_dashboard(stdscr, state, max_y, max_x, left_w, right_w)
-        else:
+        elif state.active_tab == 1:
             _draw_mode2_dashboard(stdscr, state, max_y, max_x, left_w, right_w)
+        else:
+            _draw_mode3_dashboard(stdscr, state, max_y, max_x, left_w, right_w)
 
         # ----------------------------------------------------
         # 3. Bottom Status / Hotkey Bar
@@ -1312,12 +1659,21 @@ def run_commander_tui(
                     ("F9", "Theme"),
                     ("10", "Exit"),
                 ]
-            else:
+            elif state.active_tab == 1:
                 fn_items = [
                     ("1", "Help"),
                     ("2", "Mode"),
                     ("5", "RunQueue"),
                     ("6", "AddRun"),
+                    ("F9", "Theme"),
+                    ("10", "Exit"),
+                ]
+            else:
+                fn_items = [
+                    ("1", "Help"),
+                    ("2", "Mode"),
+                    ("5", "RunSweep"),
+                    ("6", "AddSweep"),
                     ("F9", "Theme"),
                     ("10", "Exit"),
                 ]
@@ -1364,7 +1720,7 @@ def run_commander_tui(
                     bar_shortcuts = "[F1] Help [F2] Mode [F5] Convert [F9] Theme [F10] Exit"
                 else:
                     bar_shortcuts = "F1:Help F2:Mode F9:Theme F10:Exit"
-            else:
+            elif state.active_tab == 1:
                 if max_x >= 120:
                     bar_shortcuts = "[Tab] Switch  [Enter] Select  [c] Clone  [d] Del  [F1] Help  [F2] Mode  [F5] Run  [F6] Add  [F9] Theme  [F10] Exit"
                 elif max_x >= 102:
@@ -1379,6 +1735,15 @@ def run_commander_tui(
                     bar_shortcuts = "[F1] Help [F2] Mode [F5] Run [F9] Theme [F10] Exit"
                 else:
                     bar_shortcuts = "F1:Help F2:Mode F9:Theme F10:Exit"
+            else:
+                if max_x >= 120:
+                    bar_shortcuts = "[Tab] Switch  [Enter] Amend  [F1] Help  [F2] Mode  [F5] Run Sweep  [F6] Add Sweep  [F9] Theme  [F10] Exit"
+                elif max_x >= 95:
+                    bar_shortcuts = "[Tab] Switch  [F1] Help  [F2] Mode  [F5] Run Sweep  [F6] Add Sweep  [F9] Theme  [F10] Exit"
+                elif max_x >= 75:
+                    bar_shortcuts = "[Tab] Switch [F2] Mode [F5] Run [F6] Add [F9] Theme [F10] Exit"
+                else:
+                    bar_shortcuts = "F1:Help F2:Mode F5:Run F6:Add F10:Exit"
 
             shortcuts_len = len(bar_shortcuts)
             shortcuts_x = max(1, max_x - shortcuts_len - 1)
@@ -1409,9 +1774,12 @@ def run_commander_tui(
                 if state.active_tab == 0:
                     state.active_panel = ActivePanel.LEFT
                     state.left_focus_idx = 0
-                else:
+                elif state.active_tab == 1:
                     state.lora_active_panel = "left"
                     state.lora_left_focus_idx = 0
+                else:
+                    state.multi_active_panel = "left"
+                    state.multi_left_focus_idx = 0
                 continue
             break
 
@@ -1424,46 +1792,61 @@ def run_commander_tui(
 
             elif key in (curses.KEY_F2, 20):  # F2 or Ctrl+T (Mode switcher)
                 state.mode_switcher_focused = False
-                state.switch_mode(1 - state.active_tab)
+                state.switch_mode((state.active_tab + 1) % 3)
                 state.mode_switcher_idx = state.active_tab
 
             elif state.mode_switcher_focused:
                 if key in (curses.KEY_LEFT, ord("h")):
                     state.mode_switcher_idx = max(0, state.mode_switcher_idx - 1)
                 elif key in (curses.KEY_RIGHT, ord("l")):
-                    state.mode_switcher_idx = min(1, state.mode_switcher_idx + 1)
-                elif key in (9,):  # Tab toggles between modes
-                    state.mode_switcher_idx = 1 - state.mode_switcher_idx
+                    state.mode_switcher_idx = min(2, state.mode_switcher_idx + 1)
+                elif key in (9,):  # Tab cycles between modes
+                    state.mode_switcher_idx = (state.mode_switcher_idx + 1) % 3
                 elif key in (curses.KEY_DOWN, ord("j")):  # Down: return to top of left-hand pane
                     state.mode_switcher_focused = False
                     state.mode_switcher_idx = state.active_tab
                     if state.active_tab == 0:
                         state.active_panel = ActivePanel.LEFT
                         state.left_focus_idx = 0
-                    else:
+                    elif state.active_tab == 1:
                         state.lora_active_panel = "left"
                         state.lora_left_focus_idx = 0
+                    else:
+                        state.multi_active_panel = "left"
+                        state.multi_left_focus_idx = 0
                 elif key in (10, 13, curses.KEY_ENTER, 32):  # Enter: confirm switching modes
                     state.switch_mode(state.mode_switcher_idx)
                     state.mode_switcher_focused = False
                     if state.active_tab == 0:
                         state.active_panel = ActivePanel.LEFT
                         state.left_focus_idx = 0
-                    else:
+                    elif state.active_tab == 1:
                         state.lora_active_panel = "left"
                         state.lora_left_focus_idx = 0
+                    else:
+                        state.multi_active_panel = "left"
+                        state.multi_left_focus_idx = 0
 
             elif key == curses.KEY_F6:
-                added = state.add_current_lora_to_queue()
-                state.status_message = f"Added '{added.name}' to queue ({len(state.queue_manager.runs)} run(s) queued)."
-                state.status_is_error = False
+                if state.active_tab == 2:
+                    added = state.add_multi_lora_runs_to_queue()
+                    state.status_message = f"Added {len(added)} sweep run(s) to queue ({len(state.queue_manager.runs)} total queued)."
+                    state.status_is_error = False
+                elif state.active_tab == 1:
+                    added = state.add_current_lora_to_queue()
+                    state.status_message = f"Added '{added.name}' to queue ({len(state.queue_manager.runs)} run(s) queued)."
+                    state.status_is_error = False
 
             elif key == curses.KEY_F5:
                 if state.active_tab == 0:
                     res = execute_conversion(stdscr, state)
                     if res is not None:
                         conversion_result = res
+                elif state.active_tab == 1:
+                    execute_lora_queue_action(stdscr, state)
                 else:
+                    if not state.queue_manager or not state.queue_manager.get_pending_runs():
+                        state.add_multi_lora_runs_to_queue()
                     execute_lora_queue_action(stdscr, state)
 
             elif key == curses.KEY_F9:
@@ -1492,8 +1875,10 @@ def run_commander_tui(
                 res = _handle_mode1_input(stdscr, state, key, formats_list)
                 if res is not None:
                     conversion_result = res
-            else:
+            elif state.active_tab == 1:
                 _handle_mode2_input(stdscr, state, key)
+            else:
+                _handle_mode3_input(stdscr, state, key)
 
         except curses.error:
             pass

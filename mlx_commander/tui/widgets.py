@@ -657,6 +657,61 @@ def draw_field(
     safe_addstr(win, y, val_x, field_str, attr)
 
 
+def draw_multi_field(
+    win: curses.window,
+    y: int,
+    x: int,
+    label: str,
+    values: List[Any],
+    is_focused: bool = False,
+    right_edge: Optional[int] = None,
+    lbl_attr: Optional[int] = None,
+) -> None:
+    """Draw a form field that can contain multiple condition values on a single line.
+
+    All added conditions are rendered as individual boxes [ val ].
+    The rightmost box represents the active clickable target; when is_focused is True,
+    only the rightmost box is styled with COLOR_INPUT_FOCUSED while earlier boxes
+    remain in COLOR_INPUT_NORMAL.
+    """
+    lbl = f"{label}: "
+    used_lbl_attr = (
+        lbl_attr
+        if lbl_attr is not None
+        else ((get_color(COLOR_LABEL_GRAY) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
+    )
+    safe_addstr(win, y, x, lbl, used_lbl_attr)
+
+    box_strs: List[str] = []
+    for v in values:
+        if isinstance(v, float):
+            disp = f"{v:g}"
+        elif isinstance(v, bool):
+            disp = "True" if v else "False"
+        else:
+            disp = str(v)
+        box_strs.append(f"[ {disp} ]")
+
+    if not box_strs:
+        box_strs = ["[ <none> ]"]
+
+    total_w = sum(len(b) for b in box_strs) + (len(box_strs) - 1)
+    if right_edge is not None:
+        min_x = x + len(lbl)
+        val_x = max(min_x, right_edge - total_w + 1)
+    else:
+        val_x = x + len(lbl)
+
+    cur_x = val_x
+    for i, b_str in enumerate(box_strs):
+        is_last = (i == len(box_strs) - 1)
+        if is_focused and is_last:
+            attr = (get_color(COLOR_INPUT_FOCUSED) | curses.A_BOLD) if safe_has_colors() else curses.A_STANDOUT
+        else:
+            attr = get_color(COLOR_INPUT_NORMAL) if safe_has_colors() else 0
+        safe_addstr(win, y, cur_x, b_str, attr)
+        cur_x += len(b_str) + 1
+
 
 def show_column_picker_dialog(
     stdscr: curses.window,
@@ -875,6 +930,118 @@ def show_text_edit_dialog(
                 continue
             text_chars.insert(cursor_pos, char)
             cursor_pos += 1
+
+
+def show_multi_value_edit_dialog(
+    stdscr: curses.window,
+    title: str,
+    prompt: str,
+    current_values: List[Any],
+    val_type: type = int,
+) -> Optional[List[Any]]:
+    """Modal dialog overlay to edit multi-condition values as comma-separated entries."""
+    configure_escdelay(25)
+    max_y, max_x = stdscr.getmaxyx()
+    h = 8
+    w = min(max_x - 8, 68)
+    start_y = max(1, (max_y - h) // 2)
+    start_x = max(1, (max_x - w) // 2)
+
+    safe_curs_set(1)
+    if val_type is float:
+        default_str = ", ".join(f"{v:g}" for v in current_values)
+    elif val_type is bool:
+        default_str = ", ".join("True" if v else "False" for v in current_values)
+    else:
+        default_str = ", ".join(str(v) for v in current_values)
+
+    text_chars = list(default_str)
+    cursor_pos = len(text_chars)
+    err_msg = ""
+
+    while True:
+        safe_addstr(stdscr, start_y, start_x, "╔" + "═" * (w - 2) + "╗", get_color(2) | curses.A_BOLD)
+        safe_addstr(stdscr, start_y, start_x + 2, f" {title} ", (get_color(4) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
+        for r in range(1, h - 1):
+            safe_addstr(stdscr, start_y + r, start_x, "║" + " " * (w - 2) + "║", get_color(2))
+        safe_addstr(stdscr, start_y + h - 1, start_x, "╚" + "═" * (w - 2) + "╝", get_color(2) | curses.A_BOLD)
+
+        safe_addstr(stdscr, start_y + 1, start_x + 2, prompt, (get_color(4) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
+        if err_msg:
+            safe_addstr(stdscr, start_y + 2, start_x + 2, err_msg[:w - 4], (get_color(COLOR_ERROR) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
+        else:
+            hint = "Comma-separated list (e.g. 2, 4, 8) — each forms a sweep run"
+            safe_addstr(stdscr, start_y + 2, start_x + 2, hint[:w - 4], (get_color(COLOR_LABEL_GRAY) | curses.A_DIM) if safe_has_colors() else curses.A_DIM)
+
+        val_str = "".join(text_chars)
+        box_w = w - 6
+        disp = val_str[-(box_w):] if len(val_str) > box_w else val_str
+        safe_addstr(stdscr, start_y + 4, start_x + 3, disp + " " * (box_w - len(disp)), (get_color(2) | curses.A_STANDOUT) if safe_has_colors() else curses.A_STANDOUT)
+        safe_addstr(stdscr, start_y + 6, start_x + 2, "[Enter] OK   [Esc] Cancel", (get_color(4) | curses.A_DIM) if safe_has_colors() else curses.A_DIM)
+
+        cursor_x = start_x + 3 + min(cursor_pos, box_w)
+        stdscr.move(start_y + 4, cursor_x)
+        stdscr.refresh()
+
+        k = stdscr.getch()
+        if k in (10, 13, curses.KEY_ENTER):
+            tokens = [t.strip() for t in "".join(text_chars).split(",") if t.strip()]
+            if not tokens:
+                err_msg = "Please enter at least one valid value."
+                continue
+            parsed = []
+            parse_err = False
+            tok_err = ""
+            for tok in tokens:
+                try:
+                    if val_type is int:
+                        parsed.append(int(tok))
+                    elif val_type is float:
+                        parsed.append(float(tok))
+                    elif val_type is bool:
+                        tok_lower = tok.lower()
+                        if tok_lower in ("true", "1", "yes", "t", "y"):
+                            parsed.append(True)
+                        elif tok_lower in ("false", "0", "no", "f", "n"):
+                            parsed.append(False)
+                        else:
+                            parse_err = True
+                            tok_err = tok
+                            break
+                    else:
+                        parsed.append(tok)
+                except ValueError:
+                    parse_err = True
+                    tok_err = tok
+                    break
+
+            if parse_err:
+                err_msg = f"Invalid value '{tok_err}'. Expected: {val_type.__name__}."
+                continue
+
+            safe_curs_set(0)
+            return list(dict.fromkeys(parsed))
+        elif k == 27:  # ESC
+            safe_curs_set(0)
+            return None
+        elif k in (curses.KEY_BACKSPACE, 127, 8):
+            if cursor_pos > 0:
+                text_chars.pop(cursor_pos - 1)
+                cursor_pos -= 1
+                err_msg = ""
+        elif k == curses.KEY_DC:
+            if cursor_pos < len(text_chars):
+                text_chars.pop(cursor_pos)
+                err_msg = ""
+        elif k == curses.KEY_LEFT:
+            cursor_pos = max(0, cursor_pos - 1)
+        elif k == curses.KEY_RIGHT:
+            cursor_pos = min(len(text_chars), cursor_pos + 1)
+        elif 32 <= k <= 126:
+            char = chr(k)
+            text_chars.insert(cursor_pos, char)
+            cursor_pos += 1
+            err_msg = ""
 
 
 def show_output_destination_dialog(
@@ -1576,6 +1743,116 @@ def draw_queue_table(
         safe_addstr(win, header_y + h - 1, x + w - 2, "▼", (get_color(COLOR_TITLE_ACCENT) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
 
     return selected_idx
+
+
+def draw_sweep_grid(
+    win: curses.window,
+    y: int,
+    x: int,
+    h: int,
+    w: int,
+    varying_params: List[Tuple[str, str, List[Any]]],
+    total_runs_count: int,
+) -> None:
+    """
+    Draw Cartesian multi-run sweep grid matching user visual specification:
+    - Column headers for each parameter
+    - Vertically stacked box cells with internal dividers
+    - Centered multiplication cross '✖' between columns
+    - Centered total training runs footer at bottom
+    """
+    if h < 3 or w < 20 or not varying_params:
+        return
+
+    border_attr = get_color(COLOR_BORDER_JOINTS) if safe_has_colors() else 0
+    hdr_attr = (get_color(COLOR_LABEL_GRAY) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD
+    val_attr = (get_color(COLOR_NORMAL_TEXT) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD
+    cross_attr = (get_color(COLOR_TITLE_ACCENT) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD
+    footer_attr = (get_color(COLOR_NORMAL_TEXT) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD
+
+    # Format values for each column
+    formatted_cols: List[Tuple[str, List[str]]] = []
+    for field_name, label, vals in varying_params:
+        val_strs: List[str] = []
+        for v in vals:
+            if isinstance(v, float):
+                val_strs.append(f"{v:g}")
+            elif isinstance(v, bool):
+                val_strs.append("True" if v else "False")
+            else:
+                val_strs.append(str(v))
+        formatted_cols.append((label, val_strs))
+
+    # Calculate column widths
+    col_widths: List[int] = []
+    for label, val_strs in formatted_cols:
+        max_str_len = max([len(label)] + [len(s) for s in val_strs]) if val_strs else len(label)
+        cw = max(14, max_str_len + 4)
+        col_widths.append(cw)
+
+    # Gap between columns (containing the multiplication cross '✖')
+    gap = 6
+    total_grid_w = sum(col_widths) + (len(col_widths) - 1) * gap
+
+    # Center horizontally within available width w
+    if total_grid_w < w - 2:
+        start_grid_x = x + (w - total_grid_w) // 2
+    else:
+        start_grid_x = x + 2
+
+    # Draw columns and crosses
+    curr_col_x = start_grid_x
+    max_bottom_y = y
+
+    for c_idx, (label, val_strs) in enumerate(formatted_cols):
+        cw = col_widths[c_idx]
+
+        # 1. Header centered over column
+        hdr_pad = max(0, (cw - len(label)) // 2)
+        safe_addstr(win, y, curr_col_x + hdr_pad, label, hdr_attr)
+
+        # 2. Box Top border
+        box_top_y = y + 1
+        safe_addstr(win, box_top_y, curr_col_x, "┌" + "─" * (cw - 2) + "┐", border_attr)
+
+        # 3. Stacked value cells
+        cur_y = box_top_y + 1
+        for v_idx, vs in enumerate(val_strs):
+            if cur_y >= y + h - 2:
+                break
+            v_pad_l = max(0, (cw - 2 - len(vs)) // 2)
+            v_pad_r = max(0, cw - 2 - len(vs) - v_pad_l)
+            safe_addstr(win, cur_y, curr_col_x, "│", border_attr)
+            safe_addstr(win, cur_y, curr_col_x + 1, " " * v_pad_l + vs + " " * v_pad_r, val_attr)
+            safe_addstr(win, cur_y, curr_col_x + cw - 1, "│", border_attr)
+            cur_y += 1
+
+            # Cell divider (between cells)
+            if v_idx < len(val_strs) - 1 and cur_y < y + h - 2:
+                safe_addstr(win, cur_y, curr_col_x, "├" + "─" * (cw - 2) + "┤", border_attr)
+                cur_y += 1
+
+        # 4. Box Bottom border
+        if cur_y < y + h - 1:
+            safe_addstr(win, cur_y, curr_col_x, "└" + "─" * (cw - 2) + "┘", border_attr)
+            cur_y += 1
+
+        if cur_y > max_bottom_y:
+            max_bottom_y = cur_y
+
+        # 5. Multiplication cross '✖' between columns
+        if c_idx < len(formatted_cols) - 1:
+            cross_x = curr_col_x + cw + (gap - 1) // 2
+            cross_y = box_top_y + 1
+            safe_addstr(win, cross_y, cross_x, "✖", cross_attr)
+
+        curr_col_x += cw + gap
+
+    # 6. Centered footer: "<N> training runs"
+    runs_txt = f"{total_runs_count} training run" if total_runs_count == 1 else f"{total_runs_count} training runs"
+    footer_y = min(y + h - 1, max(max_bottom_y + 1, y + 4))
+    footer_x = x + max(0, (w - len(runs_txt)) // 2)
+    safe_addstr(win, footer_y, footer_x, runs_txt, footer_attr)
 
 
 def show_model_picker_dialog(
