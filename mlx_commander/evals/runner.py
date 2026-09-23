@@ -12,8 +12,14 @@ import os
 import re
 import sys
 import time
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+
+# Suppress harmless upstream UserWarnings from transformers audio/mel processor initialization in multimodal models
+warnings.filterwarnings("ignore", message=".*mel filter has all zero values.*", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*num_mel_filters.*", category=UserWarning)
+warnings.filterwarnings("ignore", module="transformers.audio_utils")
 
 from ..lora.config import LoraRunConfig, sanitize_model_slug
 from .metrics import (
@@ -420,8 +426,8 @@ def run_generative_eval(
 
     test_file_path = ds_path / "test.jsonl" if ds_path.is_dir() else ds_path
 
-    # Initial time estimation based on ~2.5s per generative inference
-    est_total_sec = total_samples * 2 * 2.5
+    # Initial time estimation based on ~0.35s per generative inference on Apple Silicon (~150 tok/s)
+    est_total_sec = total_samples * 2 * 0.35
     est_min = int(est_total_sec // 60)
     est_sec = int(est_total_sec % 60)
     est_str = f"~{est_min}m {est_sec:02d}s" if est_min > 0 else f"~{est_sec}s"
@@ -431,7 +437,7 @@ def run_generative_eval(
     print(f"  • Base Model:        {config.model} [Engine: {engine}]")
     print(f"  • Test Dataset:      {test_file_path} (Full split: {total_samples} samples)")
     print(f"  • Evaluation Passes: 2 passes (Baseline + Fine-Tuned = {total_samples * 2} generations)")
-    print(f"  • Estimated Time:    {est_str} (based on ~25 tok/s on Apple Silicon)")
+    print(f"  • Estimated Time:    {est_str} (based on ~150 tok/s on Apple Silicon)")
     sys.stdout.flush()
 
     # 1. Baseline Predictions (Pre-trained Model without LoRA)

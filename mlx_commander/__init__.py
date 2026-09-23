@@ -4,9 +4,15 @@ Convert Hugging Face datasets into Apple MLX fine-tuning formats with interactiv
 """
 
 import os
+import warnings
+
+# Suppress harmless upstream UserWarnings from transformers audio/mel processor initialization in multimodal models
+warnings.filterwarnings("ignore", message=".*mel filter has all zero values.*", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*num_mel_filters.*", category=UserWarning)
+warnings.filterwarnings("ignore", module="transformers.audio_utils")
 
 # Set ncurses escape delay to 25ms (default is 1000ms) to ensure instantaneous
 # exit/cancellation on ESC across all curses pickers and dialogs.
 os.environ.setdefault("ESCDELAY", "25")
 
-__version__ = "0.5.7"
+__version__ = "0.5.8"

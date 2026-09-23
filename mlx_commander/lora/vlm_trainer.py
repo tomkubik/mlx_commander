@@ -11,8 +11,14 @@ import json
 import logging
 import os
 import sys
+import warnings
 from pathlib import Path
 from typing import Optional
+
+# Suppress harmless upstream UserWarnings from transformers audio/mel processor initialization in multimodal models
+warnings.filterwarnings("ignore", message=".*mel filter has all zero values.*", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*num_mel_filters.*", category=UserWarning)
+warnings.filterwarnings("ignore", module="transformers.audio_utils")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("mlx_commander.vlm_trainer")
