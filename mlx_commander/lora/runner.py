@@ -239,6 +239,23 @@ def execute_single_run(
     print("-" * 60)
 
     if engine == "mlx_vlm":
+        # Safeguard: prevent mlx-vlm attention mask broadcast shape errors
+        if getattr(r, "batch_size", 1) > 1 and os.environ.get("MLX_DISABLE_VLM_SAFEGUARD") != "1":
+            from mlx_commander.lora.vlm_safeguards import calculate_vlm_batch_tweak
+            orig_b = r.batch_size
+            orig_gas = getattr(r, "grad_accumulation_steps", 1)
+            t_batch, t_gas = calculate_vlm_batch_tweak(orig_b, orig_gas)
+            r.batch_size = t_batch
+            r.grad_accumulation_steps = t_gas
+            safeguard_msg = (
+                f"\n  [MLX-VLM Safeguard] Detected mlx-vlm model with batch_size={orig_b}.\n"
+                f"  In mlx-vlm, batch_size > 1 triggers attention mask shape broadcast errors.\n"
+                f"  Auto-tweaked to batch_size={t_batch} and gradient_accumulation_steps={t_gas} "
+                f"(effective batch size: {t_gas}).\n"
+            )
+            sys.stdout.write(safeguard_msg)
+            sys.stdout.flush()
+
         cmd = [
             sys.executable, "-m", "mlx_vlm.lora",
             "--model-path", str(r.model),

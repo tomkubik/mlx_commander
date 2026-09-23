@@ -39,6 +39,12 @@ from .tracking import (
     is_wandb_logged_in,
     parse_mlx_log_line,
 )
+from .vlm_safeguards import (
+    calculate_vlm_batch_tweak,
+    calculate_vlm_sweep_tweak,
+    should_suggest_vlm_tweak,
+    should_suggest_vlm_sweep_tweak,
+)
 
 __all__ = [
     "LoraRunConfig",
@@ -72,4 +78,8 @@ __all__ = [
     "is_model_directory",
     "normalize_model_path",
     "scan_local_models",
+    "calculate_vlm_batch_tweak",
+    "calculate_vlm_sweep_tweak",
+    "should_suggest_vlm_tweak",
+    "should_suggest_vlm_sweep_tweak",
 ]

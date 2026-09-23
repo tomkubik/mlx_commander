@@ -222,7 +222,89 @@ def execute_conversion(stdscr: curses.window, state: CommanderState) -> Optional
         return None
 
 
-def validate_lora_queue_preconditions(stdscr: curses.window, model_path: str, data_path: str) -> bool:
+def prompt_vlm_batch_tweak(stdscr: Optional[curses.window], config: Any) -> bool:
+    """
+    Prompt user with an interactive suggestion dialog to tweak batch_size -> 1
+    and gradient_accumulation_steps -> effective_batch to avoid mlx-vlm attention mask crashes.
+    Returns True if user chooses Auto-tweak or Keep, or False if Cancel.
+    """
+    from mlx_commander.lora.vlm_safeguards import calculate_vlm_batch_tweak, should_suggest_vlm_tweak
+    b = getattr(config, "batch_size", 1)
+    engine = getattr(config, "engine", "mlx_lm")
+    if not should_suggest_vlm_tweak(engine, b):
+        return True
+
+    t_batch, t_gas = calculate_vlm_batch_tweak(b, getattr(config, "grad_accumulation_steps", 1))
+    opt_tweak = f"Auto-tweak: batch=1, grad_accum={t_gas} (Recommended)"
+    opt_keep = f"Keep batch_size={b} (Experimental)"
+    opt_cancel = "Cancel"
+
+    if stdscr is None:
+        config.batch_size = t_batch
+        config.grad_accumulation_steps = t_gas
+        return True
+
+    choice = show_choice_dialog(
+        stdscr,
+        "MLX-VLM Attention Mask Notice",
+        f"In mlx-vlm, batch_size={b} causes attention mask shape broadcast errors.",
+        [opt_tweak, opt_keep, opt_cancel],
+        current_val=opt_tweak,
+    )
+    if choice == opt_tweak:
+        config.batch_size = t_batch
+        config.grad_accumulation_steps = t_gas
+        return True
+    elif choice == opt_keep:
+        return True
+    return False
+
+
+def prompt_vlm_sweep_batch_tweak(stdscr: Optional[curses.window], multi_config: Any) -> bool:
+    """
+    Prompt user with an interactive suggestion dialog to tweak multi-run batch_size
+    values > 1 into gradient_accumulation_steps for mlx-vlm models.
+    Returns True if user chooses Auto-tweak or Keep, or False if Cancel.
+    """
+    from mlx_commander.lora.vlm_safeguards import calculate_vlm_sweep_tweak, should_suggest_vlm_sweep_tweak
+    b_list = getattr(multi_config, "batch_size", [1])
+    engine = getattr(multi_config, "engine", "mlx_lm")
+    if not should_suggest_vlm_sweep_tweak(engine, b_list):
+        return True
+
+    t_batches, t_gasses = calculate_vlm_sweep_tweak(b_list, getattr(multi_config, "grad_accumulation_steps", [1]))
+    opt_tweak = f"Auto-tweak: batch=[1], grad_accum={t_gasses} (Recommended)"
+    opt_keep = f"Keep batch_size={b_list} (Experimental)"
+    opt_cancel = "Cancel"
+
+    if stdscr is None:
+        multi_config.batch_size = t_batches
+        multi_config.grad_accumulation_steps = t_gasses
+        return True
+
+    choice = show_choice_dialog(
+        stdscr,
+        "MLX-VLM Attention Mask Notice",
+        "In mlx-vlm, sweep batch_size > 1 causes attention mask broadcast errors.",
+        [opt_tweak, opt_keep, opt_cancel],
+        current_val=opt_tweak,
+    )
+    if choice == opt_tweak:
+        multi_config.batch_size = t_batches
+        multi_config.grad_accumulation_steps = t_gasses
+        return True
+    elif choice == opt_keep:
+        return True
+    return False
+
+
+def validate_lora_queue_preconditions(
+    stdscr: curses.window,
+    model_path: str,
+    data_path: str,
+    config: Optional[Any] = None,
+    multi_config: Optional[Any] = None,
+) -> bool:
     """
     Validate base model and dataset before queuing or executing runs.
     Returns True if valid, or False after displaying an informative error dialog.
@@ -322,6 +404,17 @@ def validate_lora_queue_preconditions(stdscr: curses.window, model_path: str, da
             ds_err or "The dataset is incompatible with the selected fine-tuning engine.",
         )
         return False
+
+    # 5. MLX-VLM attention mask safeguard & gradient accumulation tweak
+    if engine == "mlx_vlm":
+        if config is not None:
+            config.engine = "mlx_vlm"
+            if not prompt_vlm_batch_tweak(stdscr, config):
+                return False
+        if multi_config is not None:
+            multi_config.engine = "mlx_vlm"
+            if not prompt_vlm_sweep_batch_tweak(stdscr, multi_config):
+                return False
 
     return True
 
@@ -1544,6 +1637,10 @@ def _handle_mode2_input(
                                 f"  pip install \"mlx-vlm[train]\"\n\n"
                                 f"Note: mlx-vlm requires Python 3.10+.",
                             )
+                        elif getattr(state.lora_config, "batch_size", 1) > 1:
+                            if prompt_vlm_batch_tweak(stdscr, state.lora_config):
+                                state.update_deterministic_lora_name()
+                                state.clear_estimates_cache()
             elif idx == 1:  # Dataset
                 chosen = show_dataset_picker_dialog(stdscr, state.lora_config.data)
                 if chosen:
@@ -1612,8 +1709,12 @@ def _handle_mode2_input(
                 val = show_text_edit_dialog(stdscr, "Batch Size", "Enter micro-batch size (e.g. 4):", str(state.lora_config.batch_size), is_number=True)
                 if val:
                     try:
-                        state.lora_config.batch_size = max(1, int(val))
+                        new_batch = max(1, int(val))
+                        state.lora_config.batch_size = new_batch
+                        if getattr(state.lora_config, "engine", "mlx_lm") == "mlx_vlm" and new_batch > 1:
+                            prompt_vlm_batch_tweak(stdscr, state.lora_config)
                         state.update_deterministic_lora_name()
+                        state.clear_estimates_cache()
                     except ValueError: pass
             elif idx == 2:  # Gradient Accumulation Steps
                 val = show_text_edit_dialog(stdscr, "Gradient Accumulation Steps", "Enter gradient accumulation steps (e.g. 1, 4):", str(getattr(state.lora_config, "grad_accumulation_steps", 1)), is_number=True)
@@ -1682,7 +1783,9 @@ def _handle_mode2_input(
                     state.lora_config.adapter_path = val.strip()
                     state.lora_config.is_custom_name = True
             elif idx == 15:  # Add to Queue
-                if validate_lora_queue_preconditions(stdscr, state.lora_config.model, state.lora_config.data):
+                if validate_lora_queue_preconditions(stdscr, state.lora_config.model, state.lora_config.data, config=state.lora_config):
+                    state.update_deterministic_lora_name()
+                    state.clear_estimates_cache()
                     from mlx_commander.lora.model_info import normalize_model_path
                     healed = normalize_model_path(state.lora_config.model)
                     if healed and Path(healed).exists():
@@ -1808,6 +1911,10 @@ def _handle_mode3_input(
                                 f"  pip install \"mlx-vlm[train]\"\n\n"
                                 f"Note: mlx-vlm requires Python 3.10+.",
                             )
+                        elif any(int(b) > 1 for b in state.multi_lora_config.batch_size):
+                            if prompt_vlm_sweep_batch_tweak(stdscr, state.multi_lora_config):
+                                state.update_deterministic_lora_name()
+                                state.clear_estimates_cache()
             elif idx == 1:  # Dataset
                 chosen = show_dataset_picker_dialog(stdscr, state.multi_lora_config.data)
                 if chosen:
@@ -1876,10 +1983,13 @@ def _handle_mode3_input(
                 )
                 if chosen_vals:
                     state.multi_lora_config.set_field_values(field_name, chosen_vals)
-                    state.status_message = f"Updated {field_label} conditions: {chosen_vals}"
+                    if field_name == "batch_size" and getattr(state.multi_lora_config, "engine", "mlx_lm") == "mlx_vlm":
+                        if any(int(b) > 1 for b in chosen_vals):
+                            prompt_vlm_sweep_batch_tweak(stdscr, state.multi_lora_config)
+                    state.status_message = f"Updated {field_label} conditions: {state.multi_lora_config.get_field_values(field_name)}"
                     state.status_is_error = False
             elif idx == 14:  # Add sweep to queue
-                if validate_lora_queue_preconditions(stdscr, state.multi_lora_config.model, state.multi_lora_config.data):
+                if validate_lora_queue_preconditions(stdscr, state.multi_lora_config.model, state.multi_lora_config.data, multi_config=state.multi_lora_config):
                     from mlx_commander.lora.model_info import normalize_model_path
                     healed = normalize_model_path(state.multi_lora_config.model)
                     if healed and Path(healed).exists():
@@ -1897,7 +2007,7 @@ def _handle_mode3_input(
             state.multi_active_panel = "left"
             state.multi_left_focus_idx = 0
         elif key in (10, 13, curses.KEY_ENTER, 32):  # Add sweep to queue
-            if validate_lora_queue_preconditions(stdscr, state.multi_lora_config.model, state.multi_lora_config.data):
+            if validate_lora_queue_preconditions(stdscr, state.multi_lora_config.model, state.multi_lora_config.data, multi_config=state.multi_lora_config):
                 from mlx_commander.lora.model_info import normalize_model_path
                 healed = normalize_model_path(state.multi_lora_config.model)
                 if healed and Path(healed).exists():
@@ -2214,7 +2324,7 @@ def run_commander_tui(
 
             elif key == curses.KEY_F6:
                 if state.active_tab == 2:
-                    if validate_lora_queue_preconditions(stdscr, state.multi_lora_config.model, state.multi_lora_config.data):
+                    if validate_lora_queue_preconditions(stdscr, state.multi_lora_config.model, state.multi_lora_config.data, multi_config=state.multi_lora_config):
                         from mlx_commander.lora.model_info import normalize_model_path
                         healed = normalize_model_path(state.multi_lora_config.model)
                         if healed and Path(healed).exists():
@@ -2223,7 +2333,9 @@ def run_commander_tui(
                         state.status_message = f"Added {len(added)} sweep run(s) to queue ({len(state.queue_manager.runs)} total queued)."
                         state.status_is_error = False
                 elif state.active_tab == 1:
-                    if validate_lora_queue_preconditions(stdscr, state.lora_config.model, state.lora_config.data):
+                    if validate_lora_queue_preconditions(stdscr, state.lora_config.model, state.lora_config.data, config=state.lora_config):
+                        state.update_deterministic_lora_name()
+                        state.clear_estimates_cache()
                         from mlx_commander.lora.model_info import normalize_model_path
                         healed = normalize_model_path(state.lora_config.model)
                         if healed and Path(healed).exists():
@@ -2241,7 +2353,7 @@ def run_commander_tui(
                     execute_lora_queue_action(stdscr, state)
                 else:
                     if not state.queue_manager or not state.queue_manager.get_pending_runs():
-                        if not validate_lora_queue_preconditions(stdscr, state.multi_lora_config.model, state.multi_lora_config.data):
+                        if not validate_lora_queue_preconditions(stdscr, state.multi_lora_config.model, state.multi_lora_config.data, multi_config=state.multi_lora_config):
                             continue
                         from mlx_commander.lora.model_info import normalize_model_path
                         healed = normalize_model_path(state.multi_lora_config.model)
