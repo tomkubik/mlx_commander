@@ -363,7 +363,7 @@ class LoraRunConfig:
         """Generate the equivalent mlx_lm.lora or mlx_vlm.lora command invocation."""
         if getattr(self, "engine", "mlx_lm") == "mlx_vlm":
             cmd = [
-                "mlx_vlm.lora",
+                "python3 -m mlx_vlm.lora",
                 f"--model-path {self.model}",
                 f"--dataset {self.data}",
                 f"--batch-size {self.batch_size}",
@@ -385,10 +385,10 @@ class LoraRunConfig:
                 cmd.append("--train-on-completions")
             if getattr(self, "train_vision", False):
                 cmd.append("--train-vision")
-            if self.seed != 0:
-                cmd.append(f"--seed {self.seed}")
+            if getattr(self, "grad_accumulation_steps", 1) > 1:
+                cmd.append(f"--gradient-accumulation-steps {self.grad_accumulation_steps}")
             if self.resume_adapter_file:
-                cmd.append(f"--resume-adapter-file {self.resume_adapter_file}")
+                cmd.append(f"--adapter-path {self.resume_adapter_file}")
             return " ".join(cmd)
 
         if config_file:

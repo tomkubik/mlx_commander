@@ -127,7 +127,7 @@ class TestVlmCliAndConfig(unittest.TestCase):
             adapter_path="adapters/01_gemma4",
         )
         cmd = cfg.to_cli_command()
-        self.assertTrue(cmd.startswith("mlx_vlm.lora"))
+        self.assertTrue(cmd.startswith("python3 -m mlx_vlm.lora"))
         self.assertIn("--model-path google/gemma-4-4b-it", cmd)
         self.assertIn("--dataset mlx_dataset", cmd)
         self.assertIn("--batch-size 2", cmd)
@@ -192,7 +192,7 @@ class TestVlmQueueAndRunner(unittest.TestCase):
         content = script_path.read_text(encoding="utf-8")
 
         self.assertIn("mlx_lm.lora --config", content)
-        self.assertIn("mlx_vlm.lora --model-path google/gemma-4-4b-it", content)
+        self.assertIn("python3 -m mlx_vlm.lora --model-path google/gemma-4-4b-it", content)
 
     @patch("mlx_commander.lora.runner.is_engine_installed")
     def test_execute_single_run_blocks_missing_vlm_dependency(self, mock_is_installed):

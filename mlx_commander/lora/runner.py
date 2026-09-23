@@ -224,7 +224,7 @@ def execute_single_run(
 
     if engine == "mlx_vlm":
         cmd = [
-            sys.executable, "-m", "mlx_vlm", "lora",
+            sys.executable, "-m", "mlx_vlm.lora",
             "--model-path", str(r.model),
             "--dataset", str(r.data),
             "--batch-size", str(r.batch_size),
@@ -246,10 +246,10 @@ def execute_single_run(
             cmd.append("--train-on-completions")
         if getattr(r, "train_vision", False):
             cmd.append("--train-vision")
-        if r.seed != 0:
-            cmd.extend(["--seed", str(r.seed)])
+        if getattr(r, "grad_accumulation_steps", 1) > 1:
+            cmd.extend(["--gradient-accumulation-steps", str(r.grad_accumulation_steps)])
         if r.resume_adapter_file:
-            cmd.extend(["--resume-adapter-file", str(r.resume_adapter_file)])
+            cmd.extend(["--adapter-path", str(r.resume_adapter_file)])
     else:
         cmd = [sys.executable, "-m", "mlx_lm", "lora", "--config", str(cfg_file)]
 
@@ -295,7 +295,7 @@ def execute_single_run(
         except FileNotFoundError:
             try:
                 # Fallback: python -m {engine}.lora
-                cmd_alt = [sys.executable, "-m", f"{engine}.lora"] + cmd[4:]
+                cmd_alt = [sys.executable, "-m", f"{engine}.lora"] + (cmd[3:] if engine == "mlx_vlm" else cmd[4:])
                 proc = subprocess.Popen(
                     cmd_alt,
                     stdout=subprocess.PIPE,
