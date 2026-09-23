@@ -31,10 +31,114 @@ from .storage import (
 )
 
 
+def parse_chat_prompt(prompt_text: str) -> Optional[List[Dict[str, str]]]:
+    """
+    Parse a flattened chat prompt (e.g. lines starting with system: or user:) into structured messages.
+    """
+    if not isinstance(prompt_text, str):
+        return None
+    lines = prompt_text.strip().split("\n")
+    messages: List[Dict[str, str]] = []
+    curr_role = None
+    curr_content = []
+
+    for line in lines:
+        line_s = line.strip()
+        if line_s.startswith("system:"):
+            if curr_role and curr_content:
+                messages.append({"role": curr_role, "content": "\n".join(curr_content).strip()})
+                curr_content = []
+            curr_role = "system"
+            curr_content.append(line_s[len("system:"):].strip())
+        elif line_s.startswith("user:"):
+            if curr_role and curr_content:
+                messages.append({"role": curr_role, "content": "\n".join(curr_content).strip()})
+                curr_content = []
+            curr_role = "user"
+            curr_content.append(line_s[len("user:"):].strip())
+        elif line_s.startswith("assistant:"):
+            if curr_role and curr_content:
+                messages.append({"role": curr_role, "content": "\n".join(curr_content).strip()})
+                curr_content = []
+            curr_role = "assistant"
+            curr_content.append(line_s[len("assistant:"):].strip())
+        else:
+            if curr_role is not None:
+                curr_content.append(line)
+
+    if curr_role and curr_content:
+        messages.append({"role": curr_role, "content": "\n".join(curr_content).strip()})
+
+    if messages and any(m["role"] in ("user", "system") for m in messages):
+        return messages
+    return None
+
+
+def format_prompt_for_model(item: Any, tok_or_processor: Any) -> str:
+    """
+    Format prompt for model generation using apply_chat_template with add_generation_prompt=True.
+    Ensures instruction/chat models receive turn boundaries and the assistant trigger token
+    (e.g. <start_of_turn>model\\n) rather than falling into prompt repetition loops.
+    """
+    messages = None
+    raw_prompt = ""
+
+    if isinstance(item, dict):
+        messages = item.get("messages")
+        raw_prompt = item.get("prompt", "")
+        if not messages and raw_prompt:
+            messages = parse_chat_prompt(raw_prompt)
+    elif isinstance(item, list):
+        messages = item
+    elif isinstance(item, str):
+        raw_prompt = item
+        messages = parse_chat_prompt(item)
+    else:
+        raw_prompt = str(item)
+
+    if not messages:
+        return raw_prompt
+
+    tok = getattr(tok_or_processor, "tokenizer", None) or tok_or_processor
+    apply_fn = getattr(tok_or_processor, "apply_chat_template", None) or getattr(tok, "apply_chat_template", None)
+
+    if callable(apply_fn):
+        # 1. First attempt: standard apply_chat_template
+        try:
+            return apply_fn(messages, tokenize=False, add_generation_prompt=True)
+        except Exception:
+            pass
+
+        # 2. Second attempt: merge system prompt into first user turn for models that reject system role (e.g. Gemma)
+        merged = []
+        sys_text = ""
+        for m in messages:
+            r = m.get("role", "user")
+            c = m.get("content", "")
+            if r == "system":
+                sys_text = f"{sys_text}\n\n{c}".strip() if sys_text else c
+            elif r == "user" and sys_text:
+                merged.append({"role": "user", "content": f"{sys_text}\n\n{c}"})
+                sys_text = ""
+            else:
+                merged.append({"role": r, "content": c})
+        if sys_text and not merged:
+            merged.append({"role": "user", "content": sys_text})
+
+        try:
+            return apply_fn(merged, tokenize=False, add_generation_prompt=True)
+        except Exception:
+            pass
+
+    if raw_prompt:
+        return raw_prompt
+    return "\n".join(f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages)
+
+
 def load_test_dataset(data_path: Union[Path, str]) -> List[Dict[str, Any]]:
     """
     Load test set samples from test.jsonl in dataset directory.
-    Returns normalized list of dicts with keys: 'id', 'prompt', 'golden'.
+    Returns normalized list of dicts with keys: 'id', 'prompt', 'golden', and optional 'messages'.
     """
     p = Path(data_path)
     test_file = p if p.is_file() else p / "test.jsonl"
@@ -54,6 +158,7 @@ def load_test_dataset(data_path: Union[Path, str]) -> List[Dict[str, Any]]:
 
             prompt = ""
             golden = ""
+            eval_messages: Optional[List[Dict[str, str]]] = None
 
             # 1. Prompt & Completion format
             if "prompt" in data and "completion" in data:
@@ -67,8 +172,10 @@ def load_test_dataset(data_path: Union[Path, str]) -> List[Dict[str, Any]]:
                     golden = str(msgs[-1].get("content", ""))
                     prompt_parts = [f"{m.get('role', 'user')}: {m.get('content', '')}" for m in msgs[:-1]]
                     prompt = "\n".join(prompt_parts)
+                    eval_messages = msgs[:-1]
                 else:
                     prompt = "\n".join(f"{m.get('role', 'user')}: {m.get('content', '')}" for m in msgs)
+                    eval_messages = msgs
             # 3. Text format
             elif "text" in data:
                 txt = str(data["text"])
@@ -80,11 +187,14 @@ def load_test_dataset(data_path: Union[Path, str]) -> List[Dict[str, Any]]:
                 prompt = str(data.get("prompt", ""))
                 golden = str(data.get("chosen", ""))
 
-            samples.append({
+            sample_entry: Dict[str, Any] = {
                 "id": idx + 1,
                 "prompt": prompt,
                 "golden": golden,
-            })
+            }
+            if eval_messages:
+                sample_entry["messages"] = eval_messages
+            samples.append(sample_entry)
 
     return samples
 
@@ -92,7 +202,7 @@ def load_test_dataset(data_path: Union[Path, str]) -> List[Dict[str, Any]]:
 def run_inference_batch(
     model_name: str,
     adapter_path: Optional[str],
-    prompts: List[str],
+    prompts: List[Any],
     max_tokens: int = 128,
     phase_label: str = "Evaluating",
     engine: Optional[str] = None,
@@ -124,13 +234,16 @@ def run_inference_batch(
             import mlx_lm
             model, tokenizer = mlx_lm.load(model_name, adapter_path=adapter_arg)
 
-        for idx, p in enumerate(prompts, 1):
+        tok = tokenizer or getattr(processor, "tokenizer", None) or processor
+
+        for idx, item in enumerate(prompts, 1):
+            formatted_p = format_prompt_for_model(item, tok)
             if processor is not None:
                 import mlx_vlm
                 resp = mlx_vlm.generate(
                     model=model,
                     processor=processor,
-                    prompt=p,
+                    prompt=formatted_p,
                     max_tokens=max_tokens,
                     verbose=False,
                 )
@@ -141,11 +254,19 @@ def run_inference_batch(
                 resp = mlx_lm.generate(
                     model=model,
                     tokenizer=tokenizer,
-                    prompt=p,
+                    prompt=formatted_p,
                     max_tokens=max_tokens,
                     verbose=False,
                 )
             ans = str(resp).strip()
+            # Clean common model/turn tags from generated answer if any leaked
+            for prefix in ["<start_of_turn>model", "assistant:", "model:"]:
+                if ans.lower().startswith(prefix):
+                    ans = ans[len(prefix):].strip()
+            for stop_token in ["<end_of_turn>", "<|eot_id|>", "<|im_end|>", "</s>", "<eos>", "<|endoftext|>"]:
+                if ans.endswith(stop_token):
+                    ans = ans[:-len(stop_token)].strip()
+
             predictions.append(ans)
             tok_count = max(1, len(ans.split()))
             total_tokens += tok_count
@@ -171,8 +292,9 @@ def run_inference_batch(
 
     except Exception:
         # Fallback for environments without MLX engine installed or mock testing
-        for idx, p in enumerate(prompts, 1):
-            predictions.append(f"Answer for: {p[:30]}...")
+        for idx, item in enumerate(prompts, 1):
+            p_text = item.get("prompt", str(item)) if isinstance(item, dict) else str(item)
+            predictions.append(f"Answer for: {p_text[:30]}...")
             total_tokens += 10
             pct = int((idx / total_prompts) * 100)
             if idx == 1 or idx % 10 == 0 or idx == total_prompts:
@@ -200,7 +322,7 @@ def get_or_create_baseline_cache(
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
     slug = sanitize_model_slug(model_name)
-    cache_file = cache_dir / f"baseline_{slug}_{len(samples)}_samples.json"
+    cache_file = cache_dir / f"baseline_v2_{slug}_{len(samples)}_samples.json"
 
     if cache_file.exists():
         try:
@@ -213,11 +335,10 @@ def get_or_create_baseline_cache(
             pass
 
     # Compute baseline predictions once
-    prompts = [s["prompt"] for s in samples]
     preds, _, _ = run_inference_batch(
         model_name=model_name,
         adapter_path=None,
-        prompts=prompts,
+        prompts=samples,
         phase_label="1/2 Baseline (Pre-Trained)",
         engine=engine,
     )
@@ -303,7 +424,7 @@ def run_generative_eval(
         ft_preds, elapsed_time, tps = run_inference_batch(
             model_name=config.model,
             adapter_path=config.adapter_path,
-            prompts=prompts,
+            prompts=samples,
             phase_label="2/2 Fine-Tuned Adapter",
             engine=engine,
         )

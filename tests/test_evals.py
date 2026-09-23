@@ -15,7 +15,9 @@ from mlx_commander.evals.metrics import (
     normalize_answer,
 )
 from mlx_commander.evals.runner import (
+    format_prompt_for_model,
     load_test_dataset,
+    parse_chat_prompt,
     run_generative_eval,
     run_inference_batch,
 )
@@ -326,6 +328,72 @@ class TestEvalUIControls(unittest.TestCase):
         self.assertTrue(has_no)
         self.assertFalse(any("[ Yes ]" in s for s in calls))
         self.assertFalse(any("[ No ]" in s for s in calls))
+
+
+class TestChatTemplateFormatting(unittest.TestCase):
+    def test_parse_chat_prompt(self):
+        raw = "system: You are a classifier.\nuser: Stock rose 5%."
+        msgs = parse_chat_prompt(raw)
+        self.assertIsNotNone(msgs)
+        self.assertEqual(len(msgs), 2)
+        self.assertEqual(msgs[0]["role"], "system")
+        self.assertEqual(msgs[0]["content"], "You are a classifier.")
+        self.assertEqual(msgs[1]["role"], "user")
+        self.assertEqual(msgs[1]["content"], "Stock rose 5%.")
+
+    def test_parse_non_chat_prompt(self):
+        self.assertIsNone(parse_chat_prompt("What is 2+2?"))
+        self.assertIsNone(parse_chat_prompt(""))
+
+    def test_format_prompt_gemma_merges_system_and_adds_generation_prompt(self):
+        class MockGemmaTokenizer:
+            def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=True):
+                if messages[0]["role"] == "system":
+                    raise ValueError("System role not supported")
+                res = ""
+                for m in messages:
+                    res += f"<start_of_turn>{m['role']}\n{m['content']}<end_of_turn>\n"
+                if add_generation_prompt:
+                    res += "<start_of_turn>model\n"
+                return res
+
+        sample = {
+            "messages": [
+                {"role": "system", "content": "You are a sentiment classifier."},
+                {"role": "user", "content": "Stock rallied today."},
+            ]
+        }
+        res = format_prompt_for_model(sample, MockGemmaTokenizer())
+        self.assertIn("<start_of_turn>user", res)
+        self.assertIn("You are a sentiment classifier.", res)
+        self.assertIn("Stock rallied today.", res)
+        self.assertTrue(res.endswith("<start_of_turn>model\n"))
+
+    def test_format_prompt_llama_supports_system_and_adds_generation_prompt(self):
+        class MockLlamaTokenizer:
+            def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=True):
+                res = "<|begin_of_text|>"
+                for m in messages:
+                    res += f"<|start_header_id|>{m['role']}<|end_header_id|>\n\n{m['content']}<|eot_id|>"
+                if add_generation_prompt:
+                    res += "<|start_header_id|>assistant<|end_header_id|>\n\n"
+                return res
+
+        sample = {
+            "messages": [
+                {"role": "system", "content": "System text"},
+                {"role": "user", "content": "User question"},
+            ]
+        }
+        res = format_prompt_for_model(sample, MockLlamaTokenizer())
+        self.assertIn("<|start_header_id|>system<|end_header_id|>", res)
+        self.assertIn("<|start_header_id|>assistant<|end_header_id|>", res)
+
+    def test_format_prompt_raw_string_without_template(self):
+        # No chat template available: should preserve raw prompt
+        tok = MagicMock(spec=[])
+        res = format_prompt_for_model("What is 2+2?", tok)
+        self.assertEqual(res, "What is 2+2?")
 
 
 if __name__ == "__main__":
