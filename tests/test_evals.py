@@ -15,6 +15,8 @@ from mlx_commander.evals.metrics import (
     normalize_answer,
 )
 from mlx_commander.evals.runner import (
+    clean_generation_answer,
+    extract_generation_text,
     format_prompt_for_model,
     load_test_dataset,
     parse_chat_prompt,
@@ -394,6 +396,30 @@ class TestChatTemplateFormatting(unittest.TestCase):
         tok = MagicMock(spec=[])
         res = format_prompt_for_model("What is 2+2?", tok)
         self.assertEqual(res, "What is 2+2?")
+
+    def test_extract_generation_text_from_object(self):
+        class MockGenResult:
+            def __init__(self, text):
+                self.text = text
+            def __repr__(self):
+                return f"GenerationResult(text='{self.text}', logprobs=[0.1])"
+
+        res = extract_generation_text(MockGenResult("negative"))
+        self.assertEqual(res, "negative")
+
+    def test_extract_generation_text_from_dict(self):
+        res = extract_generation_text({"text": "positive"})
+        self.assertEqual(res, "positive")
+
+    def test_extract_generation_text_from_leaked_string_repr(self):
+        leaked = "GenerationResult(text='neutral', token=106, logprobs=array([-40.5]))"
+        res = extract_generation_text(leaked)
+        self.assertEqual(res, "neutral")
+
+    def test_clean_generation_answer_strips_turn_tokens(self):
+        self.assertEqual(clean_generation_answer("<start_of_turn>model\nnegative<end_of_turn>"), "negative")
+        self.assertEqual(clean_generation_answer("assistant:\npositive<|eot_id|>"), "positive")
+        self.assertEqual(clean_generation_answer("neutral</s>"), "neutral")
 
 
 if __name__ == "__main__":

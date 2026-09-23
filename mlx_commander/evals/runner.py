@@ -9,6 +9,7 @@ Executes post-training generative evaluation:
 
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -135,6 +136,47 @@ def format_prompt_for_model(item: Any, tok_or_processor: Any) -> str:
     return "\n".join(f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages)
 
 
+def extract_generation_text(resp: Any) -> str:
+    """
+    Extract clean generated text from MLX generation response object (e.g. GenerationResult),
+    dict, or string, avoiding stringification of Python dataclass metadata and arrays.
+    """
+    if hasattr(resp, "text") and isinstance(resp.text, str):
+        return resp.text
+    if isinstance(resp, dict):
+        return str(resp.get("text", ""))
+    if hasattr(resp, "generation_text") and isinstance(resp.generation_text, str):
+        return resp.generation_text
+    if hasattr(resp, "content") and isinstance(resp.content, str):
+        return resp.content
+
+    text = str(resp).strip()
+    # If a string representation of GenerationResult leaked (e.g. from cached JSON)
+    if text.startswith("GenerationResult(") and "text=" in text:
+        m = re.search(r"text=['\"](.*?)['\"]", text)
+        if m:
+            return m.group(1)
+    return text
+
+
+def clean_generation_answer(raw_resp: Any) -> str:
+    """
+    Extract clean answer text and strip residual special tokens and turn tags.
+    """
+    ans = extract_generation_text(raw_resp).strip()
+
+    # Clean common model/turn tags from generated answer if any leaked
+    for prefix in ["<start_of_turn>model", "assistant:", "model:"]:
+        if ans.lower().startswith(prefix):
+            ans = ans[len(prefix):].strip()
+
+    for stop_token in ["<end_of_turn>", "<|eot_id|>", "<|im_end|>", "</s>", "<eos>", "<|endoftext|>"]:
+        if ans.endswith(stop_token):
+            ans = ans[:-len(stop_token)].strip()
+
+    return ans.strip()
+
+
 def load_test_dataset(data_path: Union[Path, str]) -> List[Dict[str, Any]]:
     """
     Load test set samples from test.jsonl in dataset directory.
@@ -247,8 +289,6 @@ def run_inference_batch(
                     max_tokens=max_tokens,
                     verbose=False,
                 )
-                if isinstance(resp, dict):
-                    resp = resp.get("text", "")
             else:
                 import mlx_lm
                 resp = mlx_lm.generate(
@@ -258,15 +298,7 @@ def run_inference_batch(
                     max_tokens=max_tokens,
                     verbose=False,
                 )
-            ans = str(resp).strip()
-            # Clean common model/turn tags from generated answer if any leaked
-            for prefix in ["<start_of_turn>model", "assistant:", "model:"]:
-                if ans.lower().startswith(prefix):
-                    ans = ans[len(prefix):].strip()
-            for stop_token in ["<end_of_turn>", "<|eot_id|>", "<|im_end|>", "</s>", "<eos>", "<|endoftext|>"]:
-                if ans.endswith(stop_token):
-                    ans = ans[:-len(stop_token)].strip()
-
+            ans = clean_generation_answer(resp)
             predictions.append(ans)
             tok_count = max(1, len(ans.split()))
             total_tokens += tok_count
@@ -322,15 +354,16 @@ def get_or_create_baseline_cache(
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
     slug = sanitize_model_slug(model_name)
-    cache_file = cache_dir / f"baseline_v2_{slug}_{len(samples)}_samples.json"
+    cache_file = cache_dir / f"baseline_v3_{slug}_{len(samples)}_samples.json"
 
     if cache_file.exists():
         try:
             with open(cache_file, "r", encoding="utf-8") as f:
                 cached = json.load(f)
                 if isinstance(cached, list) and len(cached) == len(samples):
+                    cleaned_cache = [clean_generation_answer(ans) for ans in cached]
                     print(f"  • [1/2 Baseline] Reusing cached baseline predictions ({len(samples)} samples).")
-                    return cached
+                    return cleaned_cache
         except Exception:
             pass
 
