@@ -69,14 +69,20 @@ def clear_estimator_cache() -> None:
     _get_dir_safetensors_size_gb.cache_clear()
 
 
-def calculate_implied_epochs(iters: int, batch_size: int, total_train_records: int) -> Optional[float]:
+def calculate_implied_epochs(
+    iters: int,
+    batch_size: int,
+    total_train_records: int,
+    grad_accumulation_steps: int = 1,
+) -> Optional[float]:
     """
-    Calculate implied epochs: (iters * batch_size) / total_train_records.
+    Calculate implied epochs: (iters * batch_size * grad_accumulation_steps) / total_train_records.
     Returns None if total_train_records is 0 or unknown.
     """
     if total_train_records <= 0 or iters <= 0 or batch_size <= 0:
         return None
-    return (iters * batch_size) / float(total_train_records)
+    eff_batch = batch_size * max(1, grad_accumulation_steps)
+    return (iters * eff_batch) / float(total_train_records)
 
 
 def parse_model_param_billions(model_name: str) -> float:

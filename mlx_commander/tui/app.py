@@ -843,19 +843,20 @@ def _draw_mode2_dashboard(
     fields_def = [
         (0, "Training Iterations", str(cfg.iters), 10, False),
         (1, "Batch Size", str(cfg.batch_size), 8, False),
-        (2, "Learning Rate", f"{cfg.learning_rate:g}", 12, False),
-        (3, "LoRA Rank (r)", str(cfg.lora_rank), 8, False),
-        (4, "LoRA Alpha (α)", f"{cfg.lora_alpha:g}", 8, False),
-        (5, "LoRA Dropout", f"{cfg.lora_dropout:g}", 8, False),
-        (6, "Max Seq Length", str(cfg.max_seq_length), 10, False),
-        (7, "Fine-Tuned Layers", str(cfg.num_layers), 8, False),
-        (8, "Grad Checkpoint", "True" if cfg.grad_checkpoint else "False", 10, False),
-        (9, "Mask Prompt", "True" if cfg.mask_prompt else "False", 10, False),
-        (10, "Save Every", str(cfg.save_every), 8, False),
-        (11, 'Steps per "Eval" (validation loss)', str(cfg.steps_per_eval), 8, False),
-        (12, "Run evals on test set (experimental)", "Yes" if getattr(cfg, "run_eval", False) else "No", 8, False),
-        (13, "Adapter Path", cfg.adapter_path, max(14, right_w - 20), False),
-        (14, "+ Add to Queue (F6)", "", 0, True),
+        (2, "Gradient Accumulation Steps", str(getattr(cfg, "grad_accumulation_steps", 1)), 8, False),
+        (3, "Learning Rate", f"{cfg.learning_rate:g}", 12, False),
+        (4, "LoRA Rank (r)", str(cfg.lora_rank), 8, False),
+        (5, "LoRA Alpha (α)", f"{cfg.lora_alpha:g}", 8, False),
+        (6, "LoRA Dropout", f"{cfg.lora_dropout:g}", 8, False),
+        (7, "Max Seq Length", str(cfg.max_seq_length), 10, False),
+        (8, "Fine-Tuned Layers", str(cfg.num_layers), 8, False),
+        (9, "Grad Checkpoint", "True" if cfg.grad_checkpoint else "False", 10, False),
+        (10, "Mask Prompt", "True" if cfg.mask_prompt else "False", 10, False),
+        (11, "Save Every", str(cfg.save_every), 8, False),
+        (12, 'Steps per "Eval" (validation loss)', str(cfg.steps_per_eval), 8, False),
+        (13, "Run evals on test set (experimental)", "Yes" if getattr(cfg, "run_eval", False) else "No", 8, False),
+        (14, "Adapter Path", cfg.adapter_path, max(14, right_w - 20), False),
+        (15, "+ Add to Queue (F6)", "", 0, True),
     ]
 
     # Handle smooth scrolling in single-column hyperparameter list
@@ -904,7 +905,10 @@ def _draw_mode2_dashboard(
 
     if epochs is not None:
         lbl_part = f"• Implied Epochs:   {epochs:.2f} epochs"
-        calc_part = f"  [(iters: {cfg.iters:,} × batch: {cfg.batch_size}) / {train_count:,} train records]"
+        if getattr(cfg, "grad_accumulation_steps", 1) > 1:
+            calc_part = f"  [(iters: {cfg.iters:,} × batch: {cfg.batch_size} × accum: {cfg.grad_accumulation_steps}) / {train_count:,} train records]"
+        else:
+            calc_part = f"  [(iters: {cfg.iters:,} × batch: {cfg.batch_size}) / {train_count:,} train records]"
         epoch_attr = (get_color(COLOR_ERROR) if curses.has_colors() else 0) if epochs < 1.0 else white_unbold
         safe_addstr(stdscr, vis_y + 1, 2, lbl_part[:max_x - 4], epoch_attr)
         if len(lbl_part) + 2 < max_x - 4:
@@ -1099,18 +1103,19 @@ def _draw_mode3_dashboard(
     multi_fields_def = [
         (0, "Training Iterations", cfg.iters, int, False),
         (1, "Batch Size", cfg.batch_size, int, False),
-        (2, "Learning Rate", cfg.learning_rate, float, False),
-        (3, "LoRA Rank (r)", cfg.lora_rank, int, False),
-        (4, "LoRA Alpha (α)", cfg.lora_alpha, float, False),
-        (5, "LoRA Dropout", cfg.lora_dropout, float, False),
-        (6, "Max Seq Length", cfg.max_seq_length, int, False),
-        (7, "Fine-Tuned Layers", cfg.num_layers, int, False),
-        (8, "Grad Checkpoint", cfg.grad_checkpoint, bool, False),
-        (9, "Mask Prompt", cfg.mask_prompt, bool, False),
-        (10, "Save Every", cfg.save_every, int, False),
-        (11, 'Steps per "Eval" (validation loss)', cfg.steps_per_eval, int, False),
-        (12, "Run evals on test set (experimental)", getattr(cfg, "run_eval", [False]), bool, False),
-        (13, "+ Add Sweep to Queue (F6)", [], None, True),
+        (2, "Gradient Accumulation Steps", cfg.grad_accumulation_steps, int, False),
+        (3, "Learning Rate", cfg.learning_rate, float, False),
+        (4, "LoRA Rank (r)", cfg.lora_rank, int, False),
+        (5, "LoRA Alpha (α)", cfg.lora_alpha, float, False),
+        (6, "LoRA Dropout", cfg.lora_dropout, float, False),
+        (7, "Max Seq Length", cfg.max_seq_length, int, False),
+        (8, "Fine-Tuned Layers", cfg.num_layers, int, False),
+        (9, "Grad Checkpoint", cfg.grad_checkpoint, bool, False),
+        (10, "Mask Prompt", cfg.mask_prompt, bool, False),
+        (11, "Save Every", cfg.save_every, int, False),
+        (12, 'Steps per "Eval" (validation loss)', cfg.steps_per_eval, int, False),
+        (13, "Run evals on test set (experimental)", getattr(cfg, "run_eval", [False]), bool, False),
+        (14, "+ Add Sweep to Queue (F6)", [], None, True),
     ]
 
     # Handle smooth scrolling in right panel
@@ -1587,7 +1592,7 @@ def _handle_mode2_input(
                 state.lora_active_panel = "left"
                 state.lora_left_focus_idx = 5
         elif key in (curses.KEY_DOWN, ord("j")):
-            if state.lora_right_focus_idx < 14:
+            if state.lora_right_focus_idx < 15:
                 state.lora_right_focus_idx += 1
             else:
                 state.lora_active_panel = "queue"
@@ -1610,66 +1615,73 @@ def _handle_mode2_input(
                         state.lora_config.batch_size = max(1, int(val))
                         state.update_deterministic_lora_name()
                     except ValueError: pass
-            elif idx == 2:  # Learning Rate
+            elif idx == 2:  # Gradient Accumulation Steps
+                val = show_text_edit_dialog(stdscr, "Gradient Accumulation Steps", "Enter gradient accumulation steps (e.g. 1, 4):", str(getattr(state.lora_config, "grad_accumulation_steps", 1)), is_number=True)
+                if val:
+                    try:
+                        state.lora_config.grad_accumulation_steps = max(1, int(val))
+                        state.update_deterministic_lora_name()
+                    except ValueError: pass
+            elif idx == 3:  # Learning Rate
                 val = show_text_edit_dialog(stdscr, "Learning Rate", "Enter learning rate (e.g. 1e-5):", f"{state.lora_config.learning_rate:g}")
                 if val:
                     try:
                         state.lora_config.learning_rate = float(val)
                         state.update_deterministic_lora_name()
                     except ValueError: pass
-            elif idx == 3:  # LoRA Rank
+            elif idx == 4:  # LoRA Rank
                 val = show_text_edit_dialog(stdscr, "LoRA Rank", "Enter rank dimension r (e.g. 8, 16):", str(state.lora_config.lora_rank), is_number=True)
                 if val:
                     try:
                         state.lora_config.lora_rank = max(1, int(val))
                         state.update_deterministic_lora_name()
                     except ValueError: pass
-            elif idx == 4:  # LoRA Alpha
+            elif idx == 5:  # LoRA Alpha
                 val = show_text_edit_dialog(stdscr, "LoRA Scale / Alpha", "Enter alpha scaling factor (e.g. 16.0):", f"{state.lora_config.lora_alpha:g}")
                 if val:
                     try:
                         state.lora_config.lora_alpha = float(val)
                         state.update_deterministic_lora_name()
                     except ValueError: pass
-            elif idx == 5:  # LoRA Dropout
+            elif idx == 6:  # LoRA Dropout
                 val = show_text_edit_dialog(stdscr, "LoRA Dropout", "Enter dropout probability (0.0 to 0.5):", f"{state.lora_config.lora_dropout:g}")
                 if val:
                     try: state.lora_config.lora_dropout = float(val)
                     except ValueError: pass
-            elif idx == 6:  # Max Seq Len
+            elif idx == 7:  # Max Seq Len
                 val = show_text_edit_dialog(stdscr, "Max Sequence Length", "Enter context window limit (e.g. 2048):", str(state.lora_config.max_seq_length), is_number=True)
                 if val:
                     try: state.lora_config.max_seq_length = max(64, int(val))
                     except ValueError: pass
-            elif idx == 7:  # Num Layers
+            elif idx == 8:  # Num Layers
                 val = show_text_edit_dialog(stdscr, "LoRA Fine-Tuned Layers", "Enter number of top layers to adapt (e.g. 16):", str(state.lora_config.num_layers), is_number=True)
                 if val:
                     try: state.lora_config.num_layers = max(1, int(val))
                     except ValueError: pass
-            elif idx == 8:  # Grad Checkpoint
+            elif idx == 9:  # Grad Checkpoint
                 state.lora_config.grad_checkpoint = not state.lora_config.grad_checkpoint
-            elif idx == 9:  # Mask Prompt
+            elif idx == 10:  # Mask Prompt
                 state.lora_config.mask_prompt = not state.lora_config.mask_prompt
-            elif idx == 10:  # Save Every
+            elif idx == 11:  # Save Every
                 val = show_text_edit_dialog(stdscr, "Save Every", "Save adapter checkpoint every N steps:", str(state.lora_config.save_every), is_number=True)
                 if val:
                     try: state.lora_config.save_every = max(1, int(val))
                     except ValueError: pass
-            elif idx == 11:  # Steps per eval
+            elif idx == 12:  # Steps per eval
                 val = show_text_edit_dialog(stdscr, 'Steps per "Eval" (validation loss)', "Evaluate on validation split every N steps:", str(state.lora_config.steps_per_eval), is_number=True)
                 if val:
                     try: state.lora_config.steps_per_eval = max(1, int(val))
                     except ValueError: pass
-            elif idx == 12:  # Run evals on test set (experimental)
+            elif idx == 13:  # Run evals on test set (experimental)
                 state.lora_config.run_eval = not getattr(state.lora_config, "run_eval", False)
                 state.status_message = f"Run evals on test set (experimental): {'Yes' if state.lora_config.run_eval else 'No'}"
                 state.status_is_error = False
-            elif idx == 13:  # Adapter Out
+            elif idx == 14:  # Adapter Out
                 val = show_text_edit_dialog(stdscr, "Adapter Path", "Directory to store fine-tuned LoRA weights:", state.lora_config.adapter_path)
                 if val:
                     state.lora_config.adapter_path = val.strip()
                     state.lora_config.is_custom_name = True
-            elif idx == 14:  # Add to Queue
+            elif idx == 15:  # Add to Queue
                 if validate_lora_queue_preconditions(stdscr, state.lora_config.model, state.lora_config.data):
                     from mlx_commander.lora.model_info import normalize_model_path
                     healed = normalize_model_path(state.lora_config.model)
@@ -1687,7 +1699,7 @@ def _handle_mode2_input(
                 state.selected_queue_idx -= 1
             else:
                 state.lora_active_panel = "right"
-                state.lora_right_focus_idx = 14
+                state.lora_right_focus_idx = 15
         elif key in (curses.KEY_DOWN, ord("j")):
             if num_runs > 0 and state.selected_queue_idx < num_runs - 1:
                 state.selected_queue_idx += 1
@@ -1844,7 +1856,7 @@ def _handle_mode3_input(
                 state.multi_active_panel = "left"
                 state.multi_left_focus_idx = 5
         elif key in (curses.KEY_DOWN, ord("j")):
-            if state.multi_right_focus_idx < 13:
+            if state.multi_right_focus_idx < 14:
                 state.multi_right_focus_idx += 1
             else:
                 state.multi_active_panel = "sweep"
@@ -1852,7 +1864,7 @@ def _handle_mode3_input(
             state.multi_active_panel = "left"
         elif key in (10, 13, curses.KEY_ENTER, 32):  # Enter or Space
             idx = state.multi_right_focus_idx
-            if idx < 13:
+            if idx < 14:
                 field_name, field_label, field_type = SWEEP_FIELD_DEFS[idx]
                 curr_vals = state.multi_lora_config.get_field_values(field_name)
                 chosen_vals = show_multi_value_edit_dialog(
@@ -1866,7 +1878,7 @@ def _handle_mode3_input(
                     state.multi_lora_config.set_field_values(field_name, chosen_vals)
                     state.status_message = f"Updated {field_label} conditions: {chosen_vals}"
                     state.status_is_error = False
-            elif idx == 13:  # Add sweep to queue
+            elif idx == 14:  # Add sweep to queue
                 if validate_lora_queue_preconditions(stdscr, state.multi_lora_config.model, state.multi_lora_config.data):
                     from mlx_commander.lora.model_info import normalize_model_path
                     healed = normalize_model_path(state.multi_lora_config.model)
@@ -1880,7 +1892,7 @@ def _handle_mode3_input(
     elif state.multi_active_panel == "sweep":
         if key in (curses.KEY_UP, ord("k")):
             state.multi_active_panel = "right"
-            state.multi_right_focus_idx = 13
+            state.multi_right_focus_idx = 14
         elif key in (curses.KEY_DOWN, ord("j")):
             state.multi_active_panel = "left"
             state.multi_left_focus_idx = 0

@@ -142,6 +142,20 @@ class TestLoraNaming(unittest.TestCase):
         )
         self.assertEqual(slug, "lora_r16_a32_lr1e-5_b4_i1000_Llama-3.2-3B-Instruct-4bit")
 
+    def test_generate_hyperparameters_slug_with_grad_accumulation(self):
+        from mlx_commander.lora.config import generate_hyperparameters_slug
+        slug = generate_hyperparameters_slug(
+            fine_tune_type="lora",
+            rank=8,
+            alpha=16.0,
+            learning_rate=1e-5,
+            batch_size=1,
+            grad_accumulation_steps=4,
+            iters=500,
+            model_name="mlx-community-gemma-4-e4b-it-bf16",
+        )
+        self.assertEqual(slug, "lora_r8_a16_lr1e-5_b1_gas4_i500_mlx-community-gemma-4-e4b-it-bf16")
+
     def test_format_adapter_filename(self):
         from mlx_commander.lora.config import format_adapter_filename
         fname1 = format_adapter_filename(

@@ -42,6 +42,17 @@ class TestMultiLoraRunConfig(unittest.TestCase):
         self.assertIn((1e-4, 2, True), combs)
         self.assertIn((5e-4, 8, False), combs)
 
+    def test_cartesian_product_with_grad_accumulation_steps(self):
+        cfg = MultiLoraRunConfig(
+            batch_size=[1],
+            grad_accumulation_steps=[1, 4],
+            iters=[500],
+        )
+        runs = cfg.generate_runs()
+        self.assertEqual(len(runs), 2)
+        self.assertEqual(runs[0].grad_accumulation_steps, 1)
+        self.assertEqual(runs[1].grad_accumulation_steps, 4)
+
     def test_varying_hyperparameters(self):
         cfg = MultiLoraRunConfig(
             learning_rate=[1e-4, 2e-4, 5e-4],
@@ -271,19 +282,19 @@ class TestMultiRunStateAndUI(unittest.TestCase):
         self.assertEqual(state.multi_active_panel, "right")
         self.assertEqual(state.multi_right_focus_idx, 0, "DOWN from bottom of selector pane must focus top row (0) of hyperparameter pane in Mode 3")
 
-        # 3. At bottom of right pane (13), press DOWN -> should go to sweep pane
-        state.multi_right_focus_idx = 13
+        # 3. At bottom of right pane (14), press DOWN -> should go to sweep pane
+        state.multi_right_focus_idx = 14
         win.reset_mock()
         win.getch.side_effect = [curses.KEY_DOWN, ord("q")]
         run_commander_tui(win, initial_state=state)
         self.assertEqual(state.multi_active_panel, "sweep", "DOWN from bottom of hyperparameter pane must focus sweep pane")
 
-        # 4. At sweep pane, press UP -> should go to right pane, bottom row (13)
+        # 4. At sweep pane, press UP -> should go to right pane, bottom row (14)
         win.reset_mock()
         win.getch.side_effect = [curses.KEY_UP, ord("q")]
         run_commander_tui(win, initial_state=state)
         self.assertEqual(state.multi_active_panel, "right")
-        self.assertEqual(state.multi_right_focus_idx, 13, "UP from sweep pane must focus bottom row (13) of hyperparameter pane")
+        self.assertEqual(state.multi_right_focus_idx, 14, "UP from sweep pane must focus bottom row (14) of hyperparameter pane")
 
         # 5. At sweep pane, press DOWN -> should wrap to left pane, top row (0)
         state.multi_active_panel = "sweep"

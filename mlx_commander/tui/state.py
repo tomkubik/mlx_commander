@@ -231,9 +231,14 @@ class CommanderState:
         return 0
 
     def get_implied_epochs(self) -> Optional[float]:
-        """Calculate implied epochs: (iters * batch_size) / train_records."""
+        """Calculate implied epochs: (iters * batch_size * grad_accumulation_steps) / train_records."""
         train_count = self.get_train_record_count()
-        return calculate_implied_epochs(self.lora_config.iters, self.lora_config.batch_size, train_count)
+        return calculate_implied_epochs(
+            self.lora_config.iters,
+            self.lora_config.batch_size,
+            train_count,
+            getattr(self.lora_config, "grad_accumulation_steps", 1),
+        )
 
     def get_memory_estimate(self) -> Dict[str, Any]:
         """Return peak memory estimate (cached by configuration parameters)."""

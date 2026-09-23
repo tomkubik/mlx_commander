@@ -19,6 +19,7 @@ from .estimator import (
 SWEEP_FIELD_DEFS = [
     ("iters", "Iterations", int),
     ("batch_size", "Batch Size", int),
+    ("grad_accumulation_steps", "Gradient Accumulation Steps", int),
     ("learning_rate", "Learning rate", float),
     ("lora_rank", "LoRA Rank", int),
     ("lora_alpha", "LoRA Alpha", float),
@@ -47,7 +48,6 @@ class MultiLoraRunConfig:
     adapter_path: str = "adapters"
     seed: int = 0
     val_batches: int = 25
-    grad_accumulation_steps: int = 1
     engine: str = "mlx_lm"
     train_vision: bool = False
     train_on_completions: bool = True
@@ -55,6 +55,7 @@ class MultiLoraRunConfig:
     # Hyperparameter lists (each can hold 1 or more conditions)
     iters: List[int] = field(default_factory=lambda: [1000])
     batch_size: List[int] = field(default_factory=lambda: [4])
+    grad_accumulation_steps: List[int] = field(default_factory=lambda: [1])
     learning_rate: List[float] = field(default_factory=lambda: [1e-5])
     lora_rank: List[int] = field(default_factory=lambda: [8])
     lora_alpha: List[float] = field(default_factory=lambda: [16.0])
@@ -131,7 +132,7 @@ class MultiLoraRunConfig:
                 adapter_path=self.adapter_path,
                 seed=self.seed,
                 val_batches=self.val_batches,
-                grad_accumulation_steps=self.grad_accumulation_steps,
+                grad_accumulation_steps=comb_dict["grad_accumulation_steps"],
                 iters=comb_dict["iters"],
                 batch_size=comb_dict["batch_size"],
                 learning_rate=comb_dict["learning_rate"],
@@ -180,9 +181,14 @@ class MultiLoraRunConfig:
         total_duration = 0.0
         max_ram_dict: Dict[str, Any] = {}
         for r in runs:
-            # 1. Implied epochs: iters, batch_size, total_train_records
+            # 1. Implied epochs: iters, batch_size, total_train_records, grad_accumulation_steps
             if dataset_records > 0:
-                ep = calculate_implied_epochs(r.iters, r.batch_size, dataset_records)
+                ep = calculate_implied_epochs(
+                    r.iters,
+                    r.batch_size,
+                    dataset_records,
+                    getattr(r, "grad_accumulation_steps", 1),
+                )
                 if ep is not None and ep < min_epochs:
                     min_epochs = ep
 

@@ -56,13 +56,14 @@ def generate_hyperparameters_slug(
     alpha: Optional[float] = None,
     learning_rate: Optional[float] = None,
     batch_size: Optional[int] = None,
+    grad_accumulation_steps: Optional[int] = None,
     iters: Optional[int] = None,
     model_name: Optional[str] = None,
 ) -> str:
     """
     Generate the self-documenting hyperparameters slug without index prefix.
     Structure:
-      {method}_r{rank}_a{alpha}_lr{lr}_b{batch}_i{iters}_{model_slug}
+      {method}_r{rank}_a{alpha}_lr{lr}_b{batch}[_gas{accum}]_i{iters}_{model_slug}
     Example:
       lora_r16_a32_lr1e-5_b4_i1000_Llama-3.2-3B-Instruct-4bit
     """
@@ -72,6 +73,7 @@ def generate_hyperparameters_slug(
         r_val = config.lora_rank
         a_val = config.lora_alpha
         b_val = config.batch_size
+        gas_val = getattr(config, "grad_accumulation_steps", 1)
         i_val = config.iters
         m_name = config.model
     else:
@@ -80,6 +82,7 @@ def generate_hyperparameters_slug(
         r_val = rank if rank is not None else 8
         a_val = alpha if alpha is not None else 16.0
         b_val = batch_size if batch_size is not None else 4
+        gas_val = grad_accumulation_steps if grad_accumulation_steps is not None else 1
         i_val = iters if iters is not None else 1000
         m_name = model_name or "model"
 
@@ -93,6 +96,8 @@ def generate_hyperparameters_slug(
         parts.append(f"a{alpha_val}")
     parts.append(f"lr{lr_str}")
     parts.append(f"b{b_val}")
+    if gas_val and gas_val > 1:
+        parts.append(f"gas{gas_val}")
     parts.append(f"i{i_val}")
     if implied_epochs is not None and implied_epochs > 0:
         parts.append(f"ep{implied_epochs:.1f}".replace(".", "p"))
@@ -110,13 +115,14 @@ def generate_deterministic_run_name(
     alpha: Optional[float] = None,
     learning_rate: Optional[float] = None,
     batch_size: Optional[int] = None,
+    grad_accumulation_steps: Optional[int] = None,
     iters: Optional[int] = None,
     model_name: Optional[str] = None,
 ) -> str:
     """
     Generate a deterministic, self-documenting run name and directory slug.
     Structure:
-      {index:02d}_{method}_r{rank}_a{alpha}_lr{lr}_b{batch}_i{iters}_{model_slug}
+      {index:02d}_{method}_r{rank}_a{alpha}_lr{lr}_b{batch}[_gas{accum}]_i{iters}_{model_slug}
     Example:
       01_lora_r16_a32_lr1e-5_b4_i1000_Llama-3.2-3B-Instruct-4bit
     """
@@ -128,6 +134,7 @@ def generate_deterministic_run_name(
         alpha=alpha,
         learning_rate=learning_rate,
         batch_size=batch_size,
+        grad_accumulation_steps=grad_accumulation_steps,
         iters=iters,
         model_name=model_name,
     )
