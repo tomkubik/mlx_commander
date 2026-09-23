@@ -9,4 +9,4 @@ import os
 # exit/cancellation on ESC across all curses pickers and dialogs.
 os.environ.setdefault("ESCDELAY", "25")
 
-__version__ = "0.5.1"
+__version__ = "0.5.2"

@@ -12,7 +12,7 @@ import re
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 
 KNOWN_VLM_MODEL_TYPES = {
@@ -139,6 +139,96 @@ def is_engine_installed(engine: str) -> bool:
         return importlib.util.find_spec(engine) is not None
     except Exception:
         return False
+
+
+def validate_dataset_for_engine(
+    data_path: Any,
+    engine: str = "mlx_lm",
+) -> Tuple[bool, Optional[str]]:
+    """
+    Validate that a dataset file or directory is structurally compatible
+    with the target fine-tuning engine (mlx-lm or mlx-vlm).
+    Returns (True, None) if valid, or (False, error_message).
+    """
+    if not data_path or str(data_path).strip() in ("", "None"):
+        return False, "Dataset path is empty or not specified."
+
+    p = Path(str(data_path).strip()).expanduser().resolve()
+    if not p.exists():
+        return False, f"Dataset path does not exist on disk: '{data_path}'."
+
+    train_file = p / "train.jsonl" if p.is_dir() else p
+    if not train_file.exists() or not train_file.is_file():
+        return False, f"Training data file 'train.jsonl' not found in '{data_path}'."
+
+    # If directory, check for multiple conflicting training files that HF datasets might merge
+    if p.is_dir() and engine == "mlx_vlm":
+        candidate_train_files = [
+            f for f in p.iterdir()
+            if f.is_file() and "train" in f.name.lower() and f.suffix.lower() in (".jsonl", ".json", ".parquet")
+        ]
+        if len(candidate_train_files) > 1:
+            names = [f.name for f in candidate_train_files]
+            return False, (
+                f"Multiple training files found in '{p.name}': {', '.join(names)}.\n\n"
+                f"Hugging Face datasets (used by mlx-vlm) attempts to concatenate all matching "
+                f"training files, which causes schema conflicts (CastError). Please remove or isolate "
+                f"extra files and keep only 'train.jsonl'."
+            )
+
+    # Inspect records in train_file
+    try:
+        sample_keys_set = set()
+        with open(train_file, "r", encoding="utf-8", errors="replace") as f:
+            for i, line in enumerate(f):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                    if isinstance(record, dict):
+                        keys_tuple = tuple(sorted(record.keys()))
+                        sample_keys_set.add(keys_tuple)
+                except Exception:
+                    pass
+                if i >= 500:
+                    break
+
+        if not sample_keys_set:
+            return False, f"The file '{train_file.name}' appears to be empty or contains no valid JSON objects."
+
+        # Check for heterogeneous schemas
+        if len(sample_keys_set) > 1:
+            schemas_str = ", ".join(f"[{', '.join(k)}]" for k in sample_keys_set)
+            return False, (
+                f"Inconsistent JSON schemas detected across rows in '{train_file.name}':\n"
+                f"Found mismatched column sets: {schemas_str}\n\n"
+                f"Hugging Face datasets requires all rows to have the exact same columns. "
+                f"Mismatched columns cause: datasets.table.CastError."
+            )
+
+        common_keys = set(next(iter(sample_keys_set)))
+
+        # Engine-specific checks
+        if engine == "mlx_vlm":
+            has_messages = "messages" in common_keys or "conversations" in common_keys
+            has_qa = "question" in common_keys and "answer" in common_keys
+            if not has_messages and not has_qa:
+                return False, (
+                    f"Incompatible dataset format for mlx-vlm:\n"
+                    f"'{train_file.name}' uses columns: {list(common_keys)}.\n\n"
+                    f"Multimodal / VLM models (like Gemma 4) powered by mlx-vlm require either:\n"
+                    f"  1. Chat / Messages format: {{\"messages\": [{{\"role\": \"...\", \"content\": \"...\"}}]}}\n"
+                    f"  2. Q&A format: {{\"question\": \"...\", \"answer\": \"...\"}}\n\n"
+                    f"mlx-vlm does not support Prompt & Completion format (prompt/completion) or causal text.\n"
+                    f"Please convert your dataset in MLX Commander (Mode 1) using 'Chat / Messages Format'."
+                )
+
+    except Exception:
+        # If sampling fails, let it pass to runner
+        pass
+
+    return True, None
 
 
 @dataclass

@@ -14,7 +14,13 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
 from .config import LoraRunConfig, format_adapter_filename
-from .model_info import is_engine_installed, is_local_path, is_model_directory, normalize_model_path
+from .model_info import (
+    is_engine_installed,
+    is_local_path,
+    is_model_directory,
+    normalize_model_path,
+    validate_dataset_for_engine,
+)
 from .queue import QueueManager
 from .tracking import WandbTracker
 
@@ -200,6 +206,16 @@ def execute_single_run(
             f"To install it, run:\n"
             f"    pip install \"mlx-vlm[train]\"\n"
         )
+        sys.stderr.write(f"\n[ERROR] {err_msg}\n")
+        with open(log_file, "w", encoding="utf-8") as lf:
+            lf.write(f"=== MLX Commander LoRA Run: {r.name} ===\n\n[ERROR] {err_msg}\n")
+        mgr.update_run_status(run_id, "failed", exit_code=1, error_message=err_msg)
+        return 1
+
+    # Pre-flight Validation: Dataset Schema and Engine Compatibility
+    is_valid_ds, ds_err = validate_dataset_for_engine(data_p, engine)
+    if not is_valid_ds:
+        err_msg = ds_err or "Dataset is incompatible with the selected fine-tuning engine."
         sys.stderr.write(f"\n[ERROR] {err_msg}\n")
         with open(log_file, "w", encoding="utf-8") as lf:
             lf.write(f"=== MLX Commander LoRA Run: {r.name} ===\n\n[ERROR] {err_msg}\n")

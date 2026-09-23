@@ -22,6 +22,7 @@ from mlx_commander.lora.model_info import (
     detect_model_engine,
     inspect_local_model,
     is_engine_installed,
+    validate_dataset_for_engine,
 )
 from mlx_commander.lora.multi_config import MultiLoraRunConfig
 from mlx_commander.lora.queue import QueueManager
@@ -252,6 +253,66 @@ class TestVlmTuiIntegration(unittest.TestCase):
             self.assertIn("pip install \"mlx-vlm[train]\"", call_args[2])
         finally:
             shutil.rmtree(tmp_data, ignore_errors=True)
+
+
+class TestVlmDatasetValidation(unittest.TestCase):
+    def setUp(self):
+        self.tmp_dir = Path(tempfile.mkdtemp(prefix="test_ds_val_"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def test_validate_dataset_accepts_valid_chat_for_vlm(self):
+        train_file = self.tmp_dir / "train.jsonl"
+        with open(train_file, "w", encoding="utf-8") as f:
+            for _ in range(5):
+                f.write(json.dumps({"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "bye"}]}) + "\n")
+
+        valid, err = validate_dataset_for_engine(self.tmp_dir, engine="mlx_vlm")
+        self.assertTrue(valid)
+        self.assertIsNone(err)
+
+    def test_validate_dataset_blocks_prompt_completion_for_vlm(self):
+        train_file = self.tmp_dir / "train.jsonl"
+        with open(train_file, "w", encoding="utf-8") as f:
+            for _ in range(5):
+                f.write(json.dumps({"prompt": "hi", "completion": "bye"}) + "\n")
+
+        valid, err = validate_dataset_for_engine(self.tmp_dir, engine="mlx_vlm")
+        self.assertFalse(valid)
+        self.assertIn("Incompatible dataset format for mlx-vlm", err)
+        self.assertIn("Chat / Messages format", err)
+
+    def test_validate_dataset_blocks_heterogeneous_schemas(self):
+        train_file = self.tmp_dir / "train.jsonl"
+        with open(train_file, "w", encoding="utf-8") as f:
+            # First row: prompt/completion
+            f.write(json.dumps({"prompt": "hi", "completion": "bye"}) + "\n")
+            # Second row: messages
+            f.write(json.dumps({"messages": [{"role": "user", "content": "hello"}]}) + "\n")
+
+        valid, err = validate_dataset_for_engine(self.tmp_dir, engine="mlx_vlm")
+        self.assertFalse(valid)
+        self.assertIn("Inconsistent JSON schemas detected", err)
+        self.assertIn("CastError", err)
+
+    def test_validate_dataset_blocks_multiple_train_files_for_vlm(self):
+        (self.tmp_dir / "train.jsonl").write_text('{"messages": [{"role": "user", "content": "1"}]}\n', encoding="utf-8")
+        (self.tmp_dir / "train_part2.jsonl").write_text('{"messages": [{"role": "user", "content": "2"}]}\n', encoding="utf-8")
+
+        valid, err = validate_dataset_for_engine(self.tmp_dir, engine="mlx_vlm")
+        self.assertFalse(valid)
+        self.assertIn("Multiple training files found", err)
+
+    def test_validate_dataset_accepts_prompt_completion_for_mlx_lm(self):
+        train_file = self.tmp_dir / "train.jsonl"
+        with open(train_file, "w", encoding="utf-8") as f:
+            for _ in range(5):
+                f.write(json.dumps({"prompt": "hi", "completion": "bye"}) + "\n")
+
+        valid, err = validate_dataset_for_engine(self.tmp_dir, engine="mlx_lm")
+        self.assertTrue(valid)
+        self.assertIsNone(err)
 
 
 if __name__ == "__main__":

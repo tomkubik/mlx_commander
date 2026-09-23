@@ -293,7 +293,12 @@ def validate_lora_queue_preconditions(stdscr: curses.window, model_path: str, da
         return False
 
     # 3. Engine dependency validation
-    from mlx_commander.lora.model_info import detect_model_engine, is_engine_installed, inspect_local_model
+    from mlx_commander.lora.model_info import (
+        detect_model_engine,
+        is_engine_installed,
+        inspect_local_model,
+        validate_dataset_for_engine,
+    )
     meta = inspect_local_model(model_path.strip())
     engine = getattr(meta, "engine", None) or detect_model_engine(raw_config=meta.raw_config if meta else None, model_name_or_path=model_path.strip())
     if engine == "mlx_vlm" and not is_engine_installed("mlx_vlm"):
@@ -305,6 +310,16 @@ def validate_lora_queue_preconditions(stdscr: curses.window, model_path: str, da
             f"Please install it in your Python environment by running:\n\n"
             f"  pip install \"mlx-vlm[train]\"\n\n"
             f"Note: mlx-vlm requires Python 3.10+.",
+        )
+        return False
+
+    # 4. Dataset engine compatibility and schema consistency
+    is_valid_ds, ds_err = validate_dataset_for_engine(data_p, engine)
+    if not is_valid_ds:
+        show_error_dialog(
+            stdscr,
+            "Dataset Incompatible",
+            ds_err or "The dataset is incompatible with the selected fine-tuning engine.",
         )
         return False
 
