@@ -4,9 +4,12 @@ from mlx_commander.lora.config import LoraRunConfig
 from mlx_commander.lora.estimator import (
     calculate_implied_epochs,
     estimate_duration,
+    estimate_eval_throughput,
     estimate_peak_memory,
-    get_hardware_memory_bytes,
     get_apple_silicon_chip,
+    get_chip_memory_bandwidth_gbps,
+    get_hardware_memory_bytes,
+    parse_model_param_billions,
 )
 
 
@@ -139,3 +142,53 @@ class TestLoraEstimator(unittest.TestCase):
             res_file = estimate_peak_memory(cfg_file)
             self.assertIn("peak_gb", res_file)
             self.assertGreater(res_file["peak_gb"], 0)
+
+    def test_parse_model_param_billions(self):
+        self.assertEqual(parse_model_param_billions("mlx-community/Llama-3.2-1B-Instruct-4bit"), 1.0)
+        self.assertEqual(parse_model_param_billions("mlx-community/Llama-3.2-3B-Instruct-4bit"), 3.0)
+        self.assertEqual(parse_model_param_billions("google/gemma-4-4b-it"), 4.0)
+        self.assertEqual(parse_model_param_billions("mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"), 8.0)
+        self.assertEqual(parse_model_param_billions("mlx-community/Qwen2.5-Coder-14B-Instruct-4bit"), 14.0)
+        self.assertEqual(parse_model_param_billions("meta-llama/Llama-3.1-70B-Instruct-4bit"), 70.0)
+
+    def test_estimate_eval_throughput_inverse_scaling(self):
+        """Verify tokens/sec is model-dependent and strictly scales inversely with model parameter size."""
+        res_1b = estimate_eval_throughput("mlx-community/Llama-3.2-1B-Instruct-4bit", total_samples=50)
+        res_8b = estimate_eval_throughput("mlx-community/Meta-Llama-3.1-8B-Instruct-4bit", total_samples=50)
+        res_70b = estimate_eval_throughput("meta-llama/Llama-3.1-70B-Instruct-4bit", total_samples=50)
+
+        # Smaller models must generate significantly faster (higher tok/s)
+        self.assertGreater(res_1b["est_tps"], res_8b["est_tps"])
+        self.assertGreater(res_8b["est_tps"], res_70b["est_tps"])
+
+        # Smaller models must complete evaluation significantly faster (lower duration)
+        self.assertLess(res_1b["est_total_sec"], res_8b["est_total_sec"])
+        self.assertLess(res_8b["est_total_sec"], res_70b["est_total_sec"])
+
+        # Model size in GB must scale with parameter count
+        self.assertLess(res_1b["model_gb"], res_8b["model_gb"])
+        self.assertLess(res_8b["model_gb"], res_70b["model_gb"])
+
+    def test_estimate_eval_throughput_quantization_speedup(self):
+        """Verify 4-bit quantization yields higher tok/s and smaller model footprint than fp16."""
+        res_q4 = estimate_eval_throughput("mlx-community/Meta-Llama-3.1-8B-Instruct-4bit", total_samples=50)
+        res_fp16 = estimate_eval_throughput("meta-llama/Meta-Llama-3.1-8B-Instruct", total_samples=50)
+
+        self.assertEqual(res_q4["quant_label"], "4-bit")
+        self.assertEqual(res_fp16["quant_label"], "fp16")
+        self.assertGreater(res_q4["est_tps"], res_fp16["est_tps"])
+        self.assertLess(res_q4["model_gb"], res_fp16["model_gb"])
+        self.assertLess(res_q4["est_total_sec"], res_fp16["est_total_sec"])
+
+    def test_estimate_eval_throughput_hardware_bandwidth(self):
+        """Verify throughput scales with Apple Silicon chip memory bandwidth (Ultra > Max > Pro > Base)."""
+        m = "mlx-community/Llama-3.2-3B-Instruct-4bit"
+        tps_ultra = estimate_eval_throughput(m, chip_name="Apple M2 Ultra")["est_tps"]
+        tps_max = estimate_eval_throughput(m, chip_name="Apple M3 Max")["est_tps"]
+        tps_pro = estimate_eval_throughput(m, chip_name="Apple M3 Pro")["est_tps"]
+        tps_base = estimate_eval_throughput(m, chip_name="Apple M1")["est_tps"]
+
+        self.assertGreater(tps_ultra, tps_max)
+        self.assertGreater(tps_max, tps_pro)
+        self.assertGreater(tps_pro, tps_base)
+

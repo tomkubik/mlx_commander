@@ -22,6 +22,7 @@ warnings.filterwarnings("ignore", message=".*num_mel_filters.*", category=UserWa
 warnings.filterwarnings("ignore", module="transformers.audio_utils")
 
 from ..lora.config import LoraRunConfig, sanitize_model_slug
+from ..lora.estimator import estimate_eval_throughput
 from .metrics import (
     build_confusion_matrix,
     build_migration_matrix,
@@ -306,7 +307,18 @@ def run_inference_batch(
                 )
             ans = clean_generation_answer(resp)
             predictions.append(ans)
-            tok_count = max(1, len(ans.split()))
+            tok_count = 0
+            if hasattr(resp, "generation_tokens") and isinstance(resp.generation_tokens, (int, list)):
+                tok_count = len(resp.generation_tokens) if isinstance(resp.generation_tokens, list) else resp.generation_tokens
+            elif hasattr(resp, "tokens") and isinstance(resp.tokens, (int, list)):
+                tok_count = len(resp.tokens) if isinstance(resp.tokens, list) else resp.tokens
+            elif hasattr(tok, "encode"):
+                try:
+                    tok_count = len(tok.encode(ans))
+                except Exception:
+                    pass
+            if tok_count <= 0:
+                tok_count = max(1, int(len(ans.split()) * 1.3))
             total_tokens += tok_count
 
             # Live milestone reporting with dynamic ETA
@@ -426,18 +438,21 @@ def run_generative_eval(
 
     test_file_path = ds_path / "test.jsonl" if ds_path.is_dir() else ds_path
 
-    # Initial time estimation based on ~0.35s per generative inference on Apple Silicon (~150 tok/s)
-    est_total_sec = total_samples * 2 * 0.35
-    est_min = int(est_total_sec // 60)
-    est_sec = int(est_total_sec % 60)
-    est_str = f"~{est_min}m {est_sec:02d}s" if est_min > 0 else f"~{est_sec}s"
+    # Dynamic, model-dependent throughput and time estimation based on parameter size, quantization, and Apple Silicon bandwidth
+    throughput_est = estimate_eval_throughput(
+        model_name=config.model,
+        total_samples=total_samples,
+        num_passes=2,
+    )
+    est_str = throughput_est["est_duration_str"]
+    summary_label = throughput_est["summary_label"]
 
     print("\n[MLX Commander] Starting Generative Evaluation on test set:")
     print(f"  • Target Checkpoint: {target_checkpoint_str} (Final trained adapter)")
     print(f"  • Base Model:        {config.model} [Engine: {engine}]")
     print(f"  • Test Dataset:      {test_file_path} (Full split: {total_samples} samples)")
     print(f"  • Evaluation Passes: 2 passes (Baseline + Fine-Tuned = {total_samples * 2} generations)")
-    print(f"  • Estimated Time:    {est_str} (based on ~150 tok/s on Apple Silicon)")
+    print(f"  • Estimated Time:    {est_str} ({summary_label})")
     sys.stdout.flush()
 
     # 1. Baseline Predictions (Pre-trained Model without LoRA)

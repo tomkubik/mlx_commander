@@ -66,6 +66,7 @@ def clear_estimator_cache() -> None:
     """Clear cached hardware info and directory size lookups."""
     get_hardware_memory_bytes.cache_clear()
     get_apple_silicon_chip.cache_clear()
+    get_chip_memory_bandwidth_gbps.cache_clear()
     _get_dir_safetensors_size_gb.cache_clear()
 
 
@@ -104,6 +105,12 @@ def parse_model_param_billions(model_name: str) -> float:
         return 8.0
     if "7b" in lower or "mistral" in lower:
         return 7.0
+    if "phi-4" in lower:
+        return 14.0
+    if "phi-3" in lower:
+        return 3.8
+    if "gemma-4" in lower or "gemma4" in lower:
+        return 4.0
     if "3b" in lower or "llama-3.2-3b" in lower or "phi-3.5" in lower:
         return 3.2
     if "1b" in lower or "llama-3.2-1b" in lower:
@@ -271,3 +278,144 @@ def estimate_duration(config: LoraRunConfig, chip_name: Optional[str] = None) ->
         "chip": chip_name,
         "iters_per_sec": round(1.0 / sec_per_step, 2) if sec_per_step > 0 else 1.0,
     }
+
+
+@functools.lru_cache(maxsize=16)
+def get_chip_memory_bandwidth_gbps(chip_name: Optional[str] = None) -> float:
+    """
+    Return estimated Unified Memory bandwidth in GB/s for Apple Silicon chip families.
+    Physics:
+    - Apple M-series Ultra: ~800 GB/s (dual-die UltraFusion interconnect)
+    - Apple M4/M5 Max: ~450 GB/s nominal
+    - Apple M1/M2/M3 Max: ~350 GB/s nominal
+    - Apple M-series Pro: ~200 GB/s nominal
+    - Apple M3/M4/M5 Base: ~135 GB/s nominal
+    - Apple M1/M2 Base: ~100 GB/s
+    - Non-Apple Silicon / Fallback: ~135 GB/s
+    """
+    if chip_name is None:
+        chip_name = get_apple_silicon_chip()
+    lower = chip_name.lower()
+    if "ultra" in lower:
+        return 800.0
+    elif "max" in lower:
+        if "m5" in lower or "m4" in lower:
+            return 450.0
+        return 350.0
+    elif "pro" in lower:
+        return 200.0
+    elif "m4" in lower or "m5" in lower:
+        return 135.0
+    elif "m3" in lower:
+        return 150.0
+    elif "m2" in lower or "m1" in lower:
+        return 100.0
+    return 135.0
+
+
+def estimate_eval_throughput(
+    model_name: str,
+    total_samples: int = 1,
+    num_passes: int = 2,
+    max_tokens: int = 128,
+    chip_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Analytical throughput and duration estimator for generative evaluation on Apple Silicon.
+    Autoregressive LLM generation is strictly memory-bandwidth bound:
+    Throughput (tok/s) = (Memory_Bandwidth_GBps / Model_Weights_GB) * Efficiency_Factor.
+
+    Returns dictionary containing:
+    - est_tps: estimated generation speed in tokens/second
+    - sec_per_sample: estimated latency per sample (prompt prefill + generation)
+    - est_total_sec: estimated total duration for (total_samples * num_passes)
+    - est_duration_str: formatted string (e.g. '~35s', '~1m 20s')
+    - param_b: model size in billions of parameters
+    - quant_label: '4-bit', '8-bit', or 'fp16'
+    - model_gb: model size in Unified Memory (GB)
+    - chip_name: hardware chip name
+    - summary_label: human-readable badge for CLI/TUI display
+    - total_generations: total samples across passes
+    """
+    if chip_name is None:
+        chip_name = get_apple_silicon_chip()
+
+    model_name_str = str(model_name or "").strip()
+    lower = model_name_str.lower()
+    param_b = parse_model_param_billions(model_name_str)
+
+    is_4bit = is_4bit_quantized(model_name_str)
+    is_8bit = "8bit" in lower or "q8" in lower or "int8" in lower
+
+    if is_4bit:
+        quant_label = "4-bit"
+        bytes_per_param = 0.65
+    elif is_8bit:
+        quant_label = "8-bit"
+        bytes_per_param = 1.15
+    else:
+        quant_label = "fp16"
+        bytes_per_param = 2.0
+
+    # Check if local model directory exists with safetensors/bin weights
+    local_p = Path(model_name_str).expanduser() if model_name_str else Path(".")
+    if local_p.is_file():
+        local_p = local_p.parent
+    if local_p.exists() and local_p.is_dir():
+        dir_size_gb = _get_dir_safetensors_size_gb(str(local_p.resolve()))
+        if dir_size_gb > 0:
+            model_gb = dir_size_gb
+            if param_b == 7.0 and "7b" not in lower:
+                param_b = max(0.5, round(dir_size_gb / bytes_per_param, 1))
+        else:
+            model_gb = max(0.5, param_b * bytes_per_param)
+    else:
+        model_gb = max(0.5, param_b * bytes_per_param)
+
+    bw = get_chip_memory_bandwidth_gbps(chip_name)
+
+    # Sustained memory-bandwidth efficiency in MLX is typically ~60% - 70%
+    # tok/s = (bw / model_gb) * 0.65, capped realistically at ~350 tok/s
+    raw_tps = (bw / model_gb) * 0.65
+    est_tps = max(1.0, min(350.0, round(raw_tps, 1)))
+
+    # In generative evaluation, average response is ~35-45 tokens (or capped by max_tokens)
+    expected_gen_tokens = min(40, max_tokens)
+    gen_time_sec = expected_gen_tokens / est_tps
+    prefill_overhead_sec = 0.08  # prompt processing & framework dispatch
+    sec_per_sample = max(0.05, round(gen_time_sec + prefill_overhead_sec, 2))
+
+    total_generations = max(1, total_samples * num_passes)
+    est_total_sec = round(total_generations * sec_per_sample, 1)
+
+    # Format duration string
+    if est_total_sec < 60:
+        est_duration_str = f"~{int(round(est_total_sec))}s"
+    elif est_total_sec < 3600:
+        mins = int(est_total_sec // 60)
+        secs = int(est_total_sec % 60)
+        est_duration_str = f"~{mins}m {secs:02d}s"
+    else:
+        hours = int(est_total_sec // 3600)
+        mins = int((est_total_sec % 3600) // 60)
+        est_duration_str = f"~{hours}h {mins:02d}m"
+
+    param_str = f"{int(param_b)}B" if param_b.is_integer() else f"{param_b}B"
+    summary_label = (
+        f"model: ~{param_str} {quant_label} [~{model_gb:.1f} GB], "
+        f"est. speed: ~{round(est_tps)} tok/s on {chip_name}"
+    )
+
+    return {
+        "est_tps": est_tps,
+        "sec_per_sample": sec_per_sample,
+        "est_total_sec": est_total_sec,
+        "est_duration_str": est_duration_str,
+        "param_b": param_b,
+        "quant_label": quant_label,
+        "model_gb": round(model_gb, 1),
+        "chip_name": chip_name,
+        "summary_label": summary_label,
+        "total_generations": total_generations,
+    }
+

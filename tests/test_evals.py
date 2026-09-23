@@ -16,6 +16,7 @@ from mlx_commander.evals.metrics import (
 )
 from mlx_commander.evals.runner import (
     clean_generation_answer,
+    estimate_eval_throughput,
     extract_generation_text,
     format_prompt_for_model,
     load_test_dataset,
@@ -253,8 +254,18 @@ class TestEvalStorageAndRunner(unittest.TestCase):
         self.assertIn("Full split: 5 samples", printed)
         self.assertIn("10 generations", printed)
         self.assertIn("Estimated Time:", printed)
+        self.assertIn("tok/s", printed)
+        self.assertIn("model: ~3B", printed)
         # Ensure full test set was evaluated (no artificial cap)
         self.assertEqual(res["summary"]["total_samples"], 5)
+
+    def test_estimate_eval_throughput_runner_integration(self):
+        est_small = estimate_eval_throughput("mlx-community/Llama-3.2-1B-Instruct-4bit", total_samples=100)
+        est_large = estimate_eval_throughput("meta-llama/Llama-3.1-70B-Instruct-4bit", total_samples=100)
+        self.assertGreater(est_small["est_tps"], est_large["est_tps"])
+        self.assertLess(est_small["est_total_sec"], est_large["est_total_sec"])
+        self.assertIn("tok/s on", est_small["summary_label"])
+        self.assertIn("tok/s on", est_large["summary_label"])
 
 
 class TestWandbEvalLogging(unittest.TestCase):
