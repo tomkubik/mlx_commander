@@ -1,3 +1,4 @@
+import io
 import json
 import tempfile
 import unittest
@@ -13,7 +14,11 @@ from mlx_commander.evals.metrics import (
     compute_word_metrics,
     normalize_answer,
 )
-from mlx_commander.evals.runner import load_test_dataset, run_generative_eval
+from mlx_commander.evals.runner import (
+    load_test_dataset,
+    run_generative_eval,
+    run_inference_batch,
+)
 from mlx_commander.evals.storage import (
     append_to_leaderboard_csv,
     generate_html_dashboard,
@@ -192,6 +197,60 @@ class TestEvalStorageAndRunner(unittest.TestCase):
             self.assertIn("MLX Commander :: Generative Eval Dashboard", html_text)
             self.assertIn("Regressed (Model Broke)", html_text)
             self.assertIn("01_test_run", html_text)
+
+    def test_run_inference_batch_milestone_output(self):
+        prompts = ["Question 1", "Question 2", "Question 3"]
+        out_buf = io.StringIO()
+        with patch("sys.stdout", out_buf):
+            preds, tok_sec, total_tok = run_inference_batch(
+                model_name="test-model",
+                adapter_path=None,
+                prompts=prompts,
+                phase_label="1/2 Baseline",
+            )
+        self.assertEqual(len(preds), 3)
+        printed = out_buf.getvalue()
+        self.assertIn("[1/2 Baseline]", printed)
+        self.assertIn("Sample 1/3", printed)
+        self.assertIn("Sample 3/3", printed)
+
+    def test_run_generative_eval_cli_transparency_and_no_cap(self):
+        ds_dir = self.base_path / "dataset_transparency"
+        ds_dir.mkdir()
+        test_file = ds_dir / "test.jsonl"
+        with open(test_file, "w", encoding="utf-8") as f:
+            for i in range(5):
+                f.write(json.dumps({"prompt": f"Q{i}", "completion": f"A{i}"}) + "\n")
+
+        adapters_dir = self.base_path / "adapters" / "02_transparent_run"
+        cfg = LoraRunConfig(
+            name="02_transparent_run",
+            model="meta-llama/Llama-3.2-3B",
+            data=str(ds_dir),
+            adapter_path=str(adapters_dir),
+            run_eval=True,
+            engine="mlx_lm",
+        )
+
+        out_buf = io.StringIO()
+        with patch("sys.stdout", out_buf):
+            res = run_generative_eval(
+                config=cfg,
+                data_path=ds_dir,
+                mock_predictions=["A0", "A1", "A2", "A3", "A4"],
+                mock_baseline=["A0", "Wrong", "Wrong", "A3", "Wrong"],
+            )
+
+        printed = out_buf.getvalue()
+        self.assertIn("Target Checkpoint:", printed)
+        self.assertIn("02_transparent_run", printed)
+        self.assertIn("Base Model:", printed)
+        self.assertIn("meta-llama/Llama-3.2-3B", printed)
+        self.assertIn("Full split: 5 samples", printed)
+        self.assertIn("10 generations", printed)
+        self.assertIn("Estimated Time:", printed)
+        # Ensure full test set was evaluated (no artificial cap)
+        self.assertEqual(res["summary"]["total_samples"], 5)
 
 
 class TestWandbEvalLogging(unittest.TestCase):

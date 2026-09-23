@@ -94,36 +94,94 @@ def run_inference_batch(
     adapter_path: Optional[str],
     prompts: List[str],
     max_tokens: int = 128,
+    phase_label: str = "Evaluating",
+    engine: Optional[str] = None,
 ) -> Tuple[List[str], float, float]:
     """
-    Generate inference answers for prompts using mlx-lm.
+    Generate inference answers for prompts using mlx-lm or mlx-vlm with live milestone updates.
     Returns: (list_of_predictions, total_time_sec, tokens_per_sec)
     """
     start_time = time.time()
     predictions: List[str] = []
     total_tokens = 0
+    total_prompts = len(prompts)
+
+    is_vlm = engine == "mlx_vlm"
+    model = None
+    tokenizer = None
+    processor = None
 
     try:
-        import mlx_lm
-        # Load model and tokenizer
         adapter_arg = adapter_path if (adapter_path and Path(adapter_path).exists()) else None
-        model, tokenizer = mlx_lm.load(model_name, adapter_path=adapter_arg)
+        if is_vlm:
+            try:
+                import mlx_vlm
+                model, processor = mlx_vlm.load(model_name, adapter_path=adapter_arg)
+            except Exception:
+                import mlx_lm
+                model, tokenizer = mlx_lm.load(model_name, adapter_path=adapter_arg)
+        else:
+            import mlx_lm
+            model, tokenizer = mlx_lm.load(model_name, adapter_path=adapter_arg)
 
-        for p in prompts:
-            resp = mlx_lm.generate(
-                model=model,
-                tokenizer=tokenizer,
-                prompt=p,
-                max_tokens=max_tokens,
-                verbose=False,
-            )
-            predictions.append(resp.strip())
-            total_tokens += max(1, len(resp.split()))
+        for idx, p in enumerate(prompts, 1):
+            if processor is not None:
+                import mlx_vlm
+                resp = mlx_vlm.generate(
+                    model=model,
+                    processor=processor,
+                    prompt=p,
+                    max_tokens=max_tokens,
+                    verbose=False,
+                )
+                if isinstance(resp, dict):
+                    resp = resp.get("text", "")
+            else:
+                import mlx_lm
+                resp = mlx_lm.generate(
+                    model=model,
+                    tokenizer=tokenizer,
+                    prompt=p,
+                    max_tokens=max_tokens,
+                    verbose=False,
+                )
+            ans = str(resp).strip()
+            predictions.append(ans)
+            tok_count = max(1, len(ans.split()))
+            total_tokens += tok_count
+
+            # Live milestone reporting with dynamic ETA
+            cur_elapsed = max(0.001, time.time() - start_time)
+            avg_per_prompt = cur_elapsed / idx
+            remaining_prompts = total_prompts - idx
+            eta_sec = remaining_prompts * avg_per_prompt
+            eta_str = f"{int(eta_sec // 60)}m {int(eta_sec % 60):02d}s" if eta_sec >= 60 else f"{int(eta_sec)}s"
+            current_tps = round(total_tokens / cur_elapsed, 1)
+            pct = int((idx / total_prompts) * 100)
+
+            milestone_step = max(1, min(5, total_prompts // 10))
+            if idx == 1 or idx % milestone_step == 0 or idx == total_prompts:
+                sys.stdout.write(
+                    f"\r  • [{phase_label}] Sample {idx}/{total_prompts} ({pct}%) | "
+                    f"{current_tps} tok/s | ETA: {eta_str}   "
+                )
+                sys.stdout.flush()
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
     except Exception:
-        # Fallback for environments without mlx_lm installed or mock testing
-        for p in prompts:
+        # Fallback for environments without MLX engine installed or mock testing
+        for idx, p in enumerate(prompts, 1):
             predictions.append(f"Answer for: {p[:30]}...")
             total_tokens += 10
+            pct = int((idx / total_prompts) * 100)
+            if idx == 1 or idx % 10 == 0 or idx == total_prompts:
+                sys.stdout.write(
+                    f"\r  • [{phase_label}] Sample {idx}/{total_prompts} ({pct}%) | Progressing...   "
+                )
+                sys.stdout.flush()
+        sys.stdout.write("\n")
+        sys.stdout.flush()
 
     elapsed = max(0.001, time.time() - start_time)
     tps = round(total_tokens / elapsed, 1)
@@ -134,6 +192,7 @@ def get_or_create_baseline_cache(
     model_name: str,
     samples: List[Dict[str, Any]],
     cache_dir: Path,
+    engine: Optional[str] = None,
 ) -> List[str]:
     """
     Retrieve cached baseline predictions without adapters, or compute once and cache.
@@ -148,13 +207,20 @@ def get_or_create_baseline_cache(
             with open(cache_file, "r", encoding="utf-8") as f:
                 cached = json.load(f)
                 if isinstance(cached, list) and len(cached) == len(samples):
+                    print(f"  • [1/2 Baseline] Reusing cached baseline predictions ({len(samples)} samples).")
                     return cached
         except Exception:
             pass
 
     # Compute baseline predictions once
     prompts = [s["prompt"] for s in samples]
-    preds, _, _ = run_inference_batch(model_name=model_name, adapter_path=None, prompts=prompts)
+    preds, _, _ = run_inference_batch(
+        model_name=model_name,
+        adapter_path=None,
+        prompts=prompts,
+        phase_label="1/2 Baseline (Pre-Trained)",
+        engine=engine,
+    )
 
     try:
         with open(cache_file, "w", encoding="utf-8") as f:
@@ -186,6 +252,33 @@ def run_generative_eval(
     total_samples = len(samples)
     prompts = [s["prompt"] for s in samples]
     goldens = [s["golden"] for s in samples]
+    engine = getattr(config, "engine", "mlx_lm")
+
+    # Explicit checkpoint path identification
+    adapter_p = Path(config.adapter_path)
+    if adapter_p.is_dir():
+        cand = adapter_p / "adapters.safetensors"
+        target_checkpoint_str = str(cand.resolve() if cand.exists() else adapter_p.resolve())
+    elif adapter_p.exists():
+        target_checkpoint_str = str(adapter_p.resolve())
+    else:
+        target_checkpoint_str = f"{adapter_p} (adapters.safetensors)"
+
+    test_file_path = ds_path / "test.jsonl" if ds_path.is_dir() else ds_path
+
+    # Initial time estimation based on ~2.5s per generative inference
+    est_total_sec = total_samples * 2 * 2.5
+    est_min = int(est_total_sec // 60)
+    est_sec = int(est_total_sec % 60)
+    est_str = f"~{est_min}m {est_sec:02d}s" if est_min > 0 else f"~{est_sec}s"
+
+    print("\n[MLX Commander] Starting Generative Evaluation on test set:")
+    print(f"  • Target Checkpoint: {target_checkpoint_str} (Final trained adapter)")
+    print(f"  • Base Model:        {config.model} [Engine: {engine}]")
+    print(f"  • Test Dataset:      {test_file_path} (Full split: {total_samples} samples)")
+    print(f"  • Evaluation Passes: 2 passes (Baseline + Fine-Tuned = {total_samples * 2} generations)")
+    print(f"  • Estimated Time:    {est_str} (based on ~25 tok/s on Apple Silicon)")
+    sys.stdout.flush()
 
     # 1. Baseline Predictions (Pre-trained Model without LoRA)
     adapter_base_dir = Path(config.adapter_path).parent if "/" in config.adapter_path else Path("adapters")
@@ -198,6 +291,7 @@ def run_generative_eval(
             model_name=config.model,
             samples=samples,
             cache_dir=cache_dir,
+            engine=engine,
         )
 
     # 2. Fine-Tuned Model Predictions (With LoRA Adapter)
@@ -210,6 +304,8 @@ def run_generative_eval(
             model_name=config.model,
             adapter_path=config.adapter_path,
             prompts=prompts,
+            phase_label="2/2 Fine-Tuned Adapter",
+            engine=engine,
         )
 
     # 3. Evaluate Metrics per sample

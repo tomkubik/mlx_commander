@@ -257,7 +257,7 @@ def execute_single_run(
             sys.stdout.flush()
 
         cmd = [
-            sys.executable, "-m", "mlx_vlm.lora",
+            sys.executable, "-m", "mlx_commander.lora.vlm_trainer",
             "--model-path", str(r.model),
             "--dataset", str(r.data),
             "--batch-size", str(r.batch_size),
@@ -293,10 +293,18 @@ def execute_single_run(
 
         def _stream_proc(proc: subprocess.Popen) -> int:
             for line in iter(proc.stdout.readline, ""):
-                sys.stdout.write(line)
-                sys.stdout.flush()
-                lf.write(line)
-                lf.flush()
+                # Highlight validation loss milestones clearly in the command line
+                if "val loss" in line.lower():
+                    v_highlight = f"\n  \033[1;36m★ [Validation Loss Milestone] {line.strip()}\033[0m\n"
+                    sys.stdout.write(v_highlight)
+                    sys.stdout.flush()
+                    lf.write(v_highlight)
+                    lf.flush()
+                else:
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+                    lf.write(line)
+                    lf.flush()
                 tracker.log_line(line)
                 if "hfvalidationerror" in line.lower() or "repo id must be in the form" in line.lower():
                     hint = f"\n  [MLX Commander Hint] {engine} could not find model '{r.model}' on disk and attempted to download it from Hugging Face Hub.\n"
