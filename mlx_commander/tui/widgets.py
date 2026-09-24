@@ -18,8 +18,8 @@ COLOR_TITLE_ACCENT = 6   # Panel Titles / Accents (Cursor / Yellow #FFFF55)
 COLOR_LABEL_GRAY = 7     # Label / Light Gray #AAAAAA (Inactive elements, background text)
 COLOR_INPUT_NORMAL = 8   # User Inputs / Inactive Fields (Ice Blue #55FFFF on Background Blue #0000AA)
 COLOR_INPUT_FOCUSED = 9  # Active / Focused Field (Prompt / Black on Highlight / Cyan)
-COLOR_FN_NUMBER = 10     # Norton Hotkey Bar: Key Number (White on Black)
-COLOR_FN_LABEL = 11      # Norton Hotkey Bar: Key Label (Black on Cyan)
+COLOR_FN_NUMBER = 10     # Classic Blue Hotkey Bar: Key Number (White on Black)
+COLOR_FN_LABEL = 11      # Classic Blue Hotkey Bar: Key Label (Black on Cyan)
 COLOR_PANEL_BG = 12      # Background Blue Fill #0000AA (Classic VGA Blue)
 
 
@@ -1296,7 +1296,7 @@ def show_help_dialog(stdscr: curses.window) -> None:
         ("c", "Clone selected LoRA run in Queue (Mode 2)"),
         ("d", "Delete selected LoRA run from Queue (Mode 2)"),
         ("x", "Clear LoRA Queue (Mode 2)"),
-        ("F9", "Toggle theme (Norton Commander <-> Modern)"),
+        ("F9", "Toggle theme (Classic Blue <-> Modern)"),
         ("r / R", "Randomize split seed"),
         ("? / F1", "Show this help screen"),
         ("F10 / q / Esc", "Exit MLX Commander"),

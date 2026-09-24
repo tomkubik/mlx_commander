@@ -1,6 +1,6 @@
 # MLX_Commander 🚀
 
-The Norton Commander-style TUI, Headless CLI & Model Context Protocol (MCP) Suite for Apple Silicon MLX Training Ops (Single Run & Multi-Run Matrix) and Hugging Face Dataset Preparation.
+The orthodox commander style TUI, Headless CLI & Model Context Protocol (MCP) Suite for Apple Silicon MLX Training Ops (Single Run & Multi-Run Matrix) and Hugging Face Dataset Preparation.
 
 Built entirely in Python with zero mandatory dependencies and zero pre-compiled binaries.
 

@@ -265,7 +265,7 @@ MLX Commander provides an MCP tool suite over `stdio`. Agents can invoke these t
 |---|---|---|
 | `inspect_dataset` | Inspects schema, row counts, splits, and suggested mappings. | `dataset_path: str` |
 | `convert_dataset_headless` | Converts dataset in background to MLX JSONL format. | `dataset_path`, `format`, `prompt_col`, `completion_col`, `train_pct`, `valid_pct`, `test_pct`, `output_dir` |
-| `launch_conversion_tui` | Launches Norton Commander TUI in macOS Terminal.app for visual review. | Same as `convert_dataset_headless` |
+| `launch_conversion_tui` | Launches Orthodox commander style TUI in macOS Terminal.app for visual review. | Same as `convert_dataset_headless` |
 | `estimate_fine_tuning_resources` | Computes peak Unified Memory (GB), safety tier, duration, and implied epochs. | `model`, `iters`, `batch_size`, `gradient_accumulation_steps`, `max_seq_length`, `lora_rank`, `grad_checkpoint`, `total_train_records` |
 | `queue_single_run` | Enqueues a single fine-tuning job with explicit parameters and VLM safeguards. | `model`, `data_path`, `name`, `batch_size`, `gradient_accumulation_steps`, `learning_rate`, `iters`, `lora_rank`, `run_eval`, `queue_dir` |
 | `queue_multi_run_sweep` | Expands hyperparameter sweep grid (Cartesian product) and enqueues all runs. | `model`, `data_path`, `learning_rate: List[float]`, `lora_rank: List[int]`, `batch_size: List[int]`, `run_eval: List[bool]`, `queue_dir` |

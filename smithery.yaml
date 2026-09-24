@@ -1,7 +1,7 @@
 # Smithery configuration for MLX Commander MCP Server
 # https://smithery.ai/docs/config
 name: mlx_commander
-description: Norton Commander-style TUI and CLI toolkit to convert Hugging Face datasets into Apple MLX format with live preview and agent pre-population.
+description: Orthodox commander style TUI and CLI toolkit to convert Hugging Face datasets into Apple MLX format with live preview and agent pre-population.
 version: "0.2.0"
 runtime: python
 startCommand:

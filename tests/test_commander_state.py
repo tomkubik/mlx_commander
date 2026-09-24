@@ -92,8 +92,8 @@ class TestCommanderState(unittest.TestCase):
         state = CommanderState()
         self.assertEqual(state.theme_mode, ThemeMode.MODERN)
         new_theme = state.toggle_theme()
-        self.assertEqual(new_theme, ThemeMode.NORTON)
-        self.assertEqual(state.theme_mode, ThemeMode.NORTON)
+        self.assertEqual(new_theme, ThemeMode.CLASSIC_BLUE)
+        self.assertEqual(state.theme_mode, ThemeMode.CLASSIC_BLUE)
         toggled_back = state.toggle_theme()
         self.assertEqual(toggled_back, ThemeMode.MODERN)
         self.assertEqual(state.theme_mode, ThemeMode.MODERN)
@@ -101,8 +101,8 @@ class TestCommanderState(unittest.TestCase):
     def test_prefill_theme(self):
         from mlx_commander.tui.state import ThemeMode
         state = CommanderState()
-        state.apply_prefill({"theme": "norton"})
-        self.assertEqual(state.theme_mode, ThemeMode.NORTON)
+        state.apply_prefill({"theme": "classic_blue"})
+        self.assertEqual(state.theme_mode, ThemeMode.CLASSIC_BLUE)
         state.apply_prefill({"theme_mode": "modern"})
         self.assertEqual(state.theme_mode, ThemeMode.MODERN)
 

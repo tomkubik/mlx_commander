@@ -648,7 +648,7 @@ def create_mcp_server():
         test_pct: float = 10.0,
         output_dir: Optional[str] = None,
     ) -> dict:
-        """Launch the MLX Commander persistent Norton Commander TUI dashboard in a macOS Terminal window
+        """Launch the MLX Commander persistent orthodox commander style TUI dashboard in a macOS Terminal window
         with pre-populated settings for user visual confirmation and live JSONL preview. Returns conversion manifest."""
         return launch_conversion_tui_tool(
             dataset_path=dataset_path,

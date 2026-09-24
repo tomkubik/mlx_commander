@@ -533,12 +533,12 @@ class TestCommanderUI(unittest.TestCase):
     @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
     @patch("mlx_commander.tui.app.init_colors")
     @patch("mlx_commander.tui.app.curses.curs_set")
-    def test_norton_color_scheme_toggle_f9_only(self, mock_curs, mock_colors, mock_has_colors):
+    def test_classic_blue_color_scheme_toggle_f9_only(self, mock_curs, mock_colors, mock_has_colors):
         from mlx_commander.tui.state import ThemeMode
         state = CommanderState()
         self.assertEqual(state.theme_mode, ThemeMode.MODERN)
 
-        # Press F9 -> switches to Norton
+        # Press F9 -> switches to Classic Blue
         # Press 9 -> ignored (does not toggle)
         # Press t -> ignored (does not toggle)
         # Press T -> ignored (does not toggle)
@@ -553,9 +553,9 @@ class TestCommanderUI(unittest.TestCase):
             ord("q"),
         ]
         run_commander_tui(self.mock_win, initial_state=state)
-        # Verify init_colors was called with both modern and norton
+        # Verify init_colors was called with both modern and classic_blue
         mock_colors.assert_any_call(ThemeMode.MODERN)
-        mock_colors.assert_any_call(ThemeMode.NORTON)
+        mock_colors.assert_any_call(ThemeMode.CLASSIC_BLUE)
         self.assertEqual(state.theme_mode, ThemeMode.MODERN)
 
     @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
@@ -564,7 +564,7 @@ class TestCommanderUI(unittest.TestCase):
     @patch("mlx_commander.tui.app.curses.start_color")
     @patch("mlx_commander.tui.app.curses.use_default_colors")
     @patch("mlx_commander.tui.app.curses.init_pair")
-    def test_init_colors_modern_and_norton(self, mock_init_pair, mock_default, mock_start, mock_init_color, mock_can_change, mock_has_colors):
+    def test_init_colors_modern_and_classic_blue(self, mock_init_pair, mock_default, mock_start, mock_init_color, mock_can_change, mock_has_colors):
         from mlx_commander.tui.app import init_colors
         from mlx_commander.tui.widgets import (
             COLOR_BANNER,
@@ -584,7 +584,7 @@ class TestCommanderUI(unittest.TestCase):
         mock_init_pair.assert_any_call(COLOR_INPUT_NORMAL, curses.COLOR_CYAN, -1)
 
         mock_init_pair.reset_mock()
-        init_colors("norton")
+        init_colors("classic_blue")
         # Verify 6 exact VGA colors initialized
         mock_init_color.assert_any_call(20, 0, 0, 666)          # #0000AA (Classic VGA Blue)
         mock_init_color.assert_any_call(21, 0, 666, 666)        # #00AAAA (Cyan)
@@ -608,15 +608,15 @@ class TestCommanderUI(unittest.TestCase):
     @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
     @patch("mlx_commander.tui.app.init_colors")
     @patch("mlx_commander.tui.app.curses.curs_set")
-    def test_norton_bottom_bar_rendering(self, mock_curs, mock_colors, mock_has_colors):
+    def test_classic_blue_bottom_bar_rendering(self, mock_curs, mock_colors, mock_has_colors):
         from mlx_commander.tui.state import ThemeMode
         state = CommanderState(active_tab=0)
-        state.theme_mode = ThemeMode.NORTON
+        state.theme_mode = ThemeMode.CLASSIC_BLUE
 
         self.mock_win.getch.side_effect = [ord("q")]
         run_commander_tui(self.mock_win, initial_state=state)
 
-        # Verify that bottom bar was drawn with Norton Commander buttons
+        # Verify that bottom bar was drawn with orthodox commander style Classic Blue buttons
         rendered_strings = [
             call_args[0][2]
             for call_args in self.mock_win.addstr.call_args_list
@@ -640,12 +640,12 @@ class TestCommanderUI(unittest.TestCase):
     @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
     @patch("mlx_commander.tui.app.init_colors")
     @patch("mlx_commander.tui.app.curses.curs_set")
-    def test_norton_bottom_bar_rendering_mode1_and_mode2(self, mock_curs, mock_colors, mock_has_colors):
+    def test_classic_blue_bottom_bar_rendering_mode1_and_mode2(self, mock_curs, mock_colors, mock_has_colors):
         from mlx_commander.tui.state import ThemeMode
 
-        # 1. Mode 1 (Single Run) in Norton Theme
+        # 1. Mode 1 (Single Run) in Classic Blue Theme
         state1 = CommanderState(active_tab=1)
-        state1.theme_mode = ThemeMode.NORTON
+        state1.theme_mode = ThemeMode.CLASSIC_BLUE
         self.mock_win.reset_mock()
         self.mock_win.getmaxyx.return_value = (30, 110)
         self.mock_win.getch.side_effect = [ord("q")]
@@ -669,9 +669,9 @@ class TestCommanderUI(unittest.TestCase):
         self.assertIn("Theme", rendered_mode1)
         self.assertIn("Exit", rendered_mode1)
 
-        # 2. Mode 2 (Multi-Run Matrix) in Norton Theme
+        # 2. Mode 2 (Multi-Run Matrix) in Classic Blue Theme
         state2 = CommanderState(active_tab=2)
-        state2.theme_mode = ThemeMode.NORTON
+        state2.theme_mode = ThemeMode.CLASSIC_BLUE
         self.mock_win.reset_mock()
         self.mock_win.getmaxyx.return_value = (30, 110)
         self.mock_win.getch.side_effect = [ord("q")]
@@ -695,7 +695,7 @@ class TestCommanderUI(unittest.TestCase):
 
         # 3. Compact mode (< 75 cols, >= 70 min required) in Mode 1
         state_compact = CommanderState(active_tab=1)
-        state_compact.theme_mode = ThemeMode.NORTON
+        state_compact.theme_mode = ThemeMode.CLASSIC_BLUE
         self.mock_win.reset_mock()
         self.mock_win.getmaxyx.return_value = (30, 72)
         self.mock_win.getch.side_effect = [ord("q")]

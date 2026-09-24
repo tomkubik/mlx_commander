@@ -51,17 +51,26 @@ class ActivePanel(Enum):
 
 class ThemeMode(str, Enum):
     MODERN = "modern"
-    NORTON = "norton"
+    CLASSIC_BLUE = "classic_blue"
+
+    # Backward compatibility alias
+    NORTON = "classic_blue"
 
     def __str__(self) -> str:
         return self.value
 
     @classmethod
-    def is_norton(cls, mode: Any) -> bool:
+    def is_classic_blue(cls, mode: Any) -> bool:
         if isinstance(mode, cls):
-            return mode == cls.NORTON
+            return mode in (cls.CLASSIC_BLUE, cls.NORTON)
         val = getattr(mode, "value", str(mode))
-        return "norton" in str(val).lower() or str(val).lower().strip() in ("nc", "blue", "classic")
+        val_clean = str(val).lower().strip()
+        return val_clean in ("classic_blue", "classic blue", "blue", "classic", "orthodox", "norton", "nc") or "classic_blue" in val_clean
+
+    @classmethod
+    def is_norton(cls, mode: Any) -> bool:
+        """Alias for is_classic_blue for backward compatibility."""
+        return cls.is_classic_blue(mode)
 
 
 @dataclass
@@ -500,8 +509,8 @@ class CommanderState:
         # Theme prefill
         theme_val = config.get("theme") or config.get("theme_mode")
         if theme_val:
-            if str(theme_val).lower().strip() in ("norton", "nc", "blue", "classic"):
-                self.theme_mode = ThemeMode.NORTON
+            if str(theme_val).lower().strip() in ("classic_blue", "classic blue", "blue", "classic", "orthodox", "norton", "nc"):
+                self.theme_mode = ThemeMode.CLASSIC_BLUE
             else:
                 self.theme_mode = ThemeMode.MODERN
 
@@ -542,11 +551,11 @@ class CommanderState:
             self.lora_config.wandb_project = self.wandb_project
 
     def toggle_theme(self) -> str:
-        """Toggle between Modern and Norton Commander color schemes."""
-        if ThemeMode.is_norton(self.theme_mode):
+        """Toggle between Modern and Classic Blue color schemes."""
+        if ThemeMode.is_classic_blue(self.theme_mode):
             self.theme_mode = ThemeMode.MODERN
         else:
-            self.theme_mode = ThemeMode.NORTON
+            self.theme_mode = ThemeMode.CLASSIC_BLUE
         return self.theme_mode
 
 

@@ -1,6 +1,6 @@
 """
 MLX Commander: Persistent Full-Screen Curses TUI Dashboard.
-Dual-panel Norton Commander-style interface with real-time reactive JSONL preview.
+Dual-panel orthodox commander style interface with real-time reactive JSONL preview.
 
 Layout:
 ┌─ Dataset & Schema (Left Panel) ─────────┐┌─ MLX Format & Mappings (Right Panel) ─────┐
@@ -95,9 +95,9 @@ from mlx_commander.tui.widgets import (
 )
 
 
-def init_nc_palette() -> Tuple[int, int, int, int, int, int, int]:
+def init_classic_blue_palette() -> Tuple[int, int, int, int, int, int, int]:
     """
-    Configure and return Norton Commander VGA color indices:
+    Configure and return Classic Blue VGA color indices:
       - Background Blue: #0000AA (Classic VGA Blue)
       - Highlight / Cyan: #00AAAA (Cyan)
       - Main Text / White: #FFFFFF (Bright White)
@@ -134,16 +134,20 @@ def init_nc_palette() -> Tuple[int, int, int, int, int, int, int]:
         )
 
 
+# Backward compatibility alias
+init_nc_palette = init_classic_blue_palette
+
+
 def init_colors(theme_mode: Any = "modern") -> None:
-    """Initialize curses color pairs for Modern or Norton Commander color schemes."""
+    """Initialize curses color pairs for Modern or Classic Blue color schemes."""
     if not curses.has_colors():
         return
     curses.start_color()
-    is_norton = ThemeMode.is_norton(theme_mode)
+    is_classic_blue = ThemeMode.is_classic_blue(theme_mode)
 
-    if is_norton:
-        c_blue, c_cyan, c_white, c_gray, c_yellow, c_black, c_ice_blue = init_nc_palette()
-        # Norton Commander Classic EGA/VGA Palette:
+    if is_classic_blue:
+        c_blue, c_cyan, c_white, c_gray, c_yellow, c_black, c_ice_blue = init_classic_blue_palette()
+        # Classic Blue EGA/VGA Palette:
         # Pair 1: Top Header Banner (Prompt / Black on Highlight / Cyan)
         curses.init_pair(COLOR_BANNER, c_black, c_cyan)
         # Pair 2: Highlight / Cyan Joints & Borders on Background Blue
@@ -2119,7 +2123,7 @@ def run_commander_tui(
         state.apply_prefill(prefill)
 
     init_colors(state.theme_mode)
-    if ThemeMode.is_norton(state.theme_mode):
+    if ThemeMode.is_classic_blue(state.theme_mode):
         try:
             stdscr.bkgd(" ", get_color(COLOR_PANEL_BG))
         except curses.error:
@@ -2242,7 +2246,7 @@ def run_commander_tui(
         # 3. Bottom Status / Hotkey Bar
         # ----------------------------------------------------
         footer_y = max_y - 1
-        if ThemeMode.is_norton(state.theme_mode):
+        if ThemeMode.is_classic_blue(state.theme_mode):
             if state.active_tab == 0:
                 if max_x >= 100:
                     fn_items = [
@@ -2581,12 +2585,12 @@ def run_commander_tui(
             elif key == curses.KEY_F9:
                 state.toggle_theme()
                 init_colors(state.theme_mode)
-                if ThemeMode.is_norton(state.theme_mode):
+                if ThemeMode.is_classic_blue(state.theme_mode):
                     try:
                         stdscr.bkgd(" ", get_color(COLOR_PANEL_BG))
                     except curses.error:
                         pass
-                    state.status_message = "Theme: Norton Commander (Classic Blue)"
+                    state.status_message = "Theme: Classic Blue"
                 else:
                     try:
                         stdscr.bkgd(" ", curses.color_pair(0))
