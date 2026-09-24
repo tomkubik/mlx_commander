@@ -105,7 +105,7 @@ class TestMultiRunStateAndUI(unittest.TestCase):
         self.assertEqual(state.active_tab, 0)
         state.switch_mode(2)
         self.assertEqual(state.active_tab, 2)
-        self.assertIn("Fine-Tuning Multi-Run", state.status_message)
+        self.assertIn("Multi-Run Matrix", state.status_message)
 
     def test_add_multi_lora_runs_to_queue(self):
         state = CommanderState()
@@ -184,7 +184,7 @@ class TestMultiRunStateAndUI(unittest.TestCase):
         ]
         run_commander_tui(self.mock_win, initial_state=state)
         self.assertEqual(state.active_tab, 2)
-        self.assertIn("Fine-Tuning Multi-Run", state.status_message)
+        self.assertIn("Multi-Run Matrix", state.status_message)
 
     @patch("mlx_commander.tui.app.curses.has_colors", return_value=False)
     @patch("mlx_commander.tui.app.init_colors")

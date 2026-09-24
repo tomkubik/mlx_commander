@@ -1110,12 +1110,12 @@ def load_single_local_dataset(path: Union[Path, str]) -> LoadedDataset:
             if is_model_directory(file_path.parent):
                 raise ValueError(
                     f"'{file_path.name}' is a model architecture configuration file inside '{file_path.parent.name}', not a training dataset. "
-                    f"To fine-tune this model, switch to Mode 2: Fine-Tuning Single Run (press F2 or Tab 2) and select '{file_path.parent.name}' under 'Base Model'."
+                    f"To fine-tune this model, switch to Mode 2: Single Run (press F2 or Tab 2) and select '{file_path.parent.name}' under 'Base Model'."
                 )
         if file_path.suffix.lower() in (".safetensors", ".bin", ".mlx", ".pt"):
             raise ValueError(
                 f"'{file_path.name}' is a machine learning model weights file, not a training dataset. "
-                f"To fine-tune this model, switch to Mode 2: Fine-Tuning Single Run (press F2 or Tab 2) and select the model folder under 'Base Model'."
+                f"To fine-tune this model, switch to Mode 2: Single Run (press F2 or Tab 2) and select the model folder under 'Base Model'."
             )
 
         ext = file_path.suffix.lower()
@@ -1149,7 +1149,7 @@ def load_single_local_dataset(path: Union[Path, str]) -> LoadedDataset:
             size_str = f" ({meta.architecture}, {meta.file_size_gb:.1f} GB)" if meta.file_size_gb > 0 else ""
             raise ValueError(
                 f"'{file_path.name}' is a machine learning base model directory{size_str}, not a training dataset. "
-                f"To fine-tune this model, switch to Mode 2: Fine-Tuning Single Run (press F2 or Tab 2) "
+                f"To fine-tune this model, switch to Mode 2: Single Run (press F2 or Tab 2) "
                 f"and select it under 'Base Model'. Datasets should contain training samples (e.g. .parquet, .jsonl, .csv, or train.jsonl)."
             )
 

@@ -97,7 +97,7 @@ class CommanderState:
     preview_error: Optional[str] = None
 
     # Screen / Mode Navigation
-    active_tab: int = 0  # 0: Dataset Conversion, 1: Fine-Tuning Single Run, 2: Fine-Tuning Multi-Run
+    active_tab: int = 0  # 0: Dataset Conversion, 1: Single Run, 2: Multi-Run Matrix
     mode_switcher_focused: bool = False
     mode_switcher_idx: int = 0
 
@@ -297,13 +297,13 @@ class CommanderState:
             self.active_tab = target_tab
             if self.active_tab == 1:
                 self.sync_dataset_to_lora()
-                self.status_message = "Switched to Fine-Tuning Single Run Mode."
+                self.status_message = "Switched to Single Run Mode."
             elif self.active_tab == 2:
                 self.sync_dataset_to_lora()
                 self.multi_lora_config.model = self.lora_config.model
                 self.multi_lora_config.fine_tune_type = self.lora_config.fine_tune_type
                 self.multi_lora_config.optimizer = self.lora_config.optimizer
-                self.status_message = "Switched to Fine-Tuning Multi-Run Mode."
+                self.status_message = "Switched to Multi-Run Matrix Mode."
             else:
                 self.status_message = "Switched to Dataset Conversion Mode."
             self.status_is_error = False

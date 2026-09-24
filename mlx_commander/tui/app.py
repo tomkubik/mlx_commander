@@ -1412,7 +1412,7 @@ def _handle_mode1_input(
                     if is_model_directory(chosen_p):
                         meta = inspect_local_model(str(chosen_p))
                         size_txt = f" ({meta.architecture}, {meta.file_size_gb:.1f} GB)" if meta.file_size_gb > 0 else ""
-                        switch_opt = "Switch to Mode 2 (Fine-Tuning Single Run) & set as Base Model"
+                        switch_opt = "Switch to Mode 2 (Single Run) & set as Base Model"
                         cancel_opt = "Cancel (Stay in Dataset Converter)"
                         choice = show_choice_dialog(
                             stdscr,
@@ -2101,8 +2101,8 @@ def run_commander_tui(
         x_m1 = 2 + len(title_prefix)
 
         mode1_title = "[ 1: Dataset Converter ]"
-        mode2_title = "[ 2: Fine-Tuning Single Run ]"
-        mode3_title = "[ 3: Fine-Tuning Multi-Run ]"
+        mode2_title = "[ 2: Single Run ]"
+        mode3_title = "[ 3: Multi-Run Matrix ]"
         if state.mode_switcher_focused:
             focused_attr = (get_color(COLOR_INPUT_FOCUSED) | curses.A_BOLD) if curses.has_colors() else (curses.A_STANDOUT | curses.A_BOLD)
             active_attr = hdr_attr | curses.A_STANDOUT | curses.A_BOLD

@@ -1024,7 +1024,8 @@ class TestCommanderUI(unittest.TestCase):
         self.assertNotIn("F10: Exit", row0_text)
         self.assertNotIn("(F2)", row0_text)
         self.assertIn("1: Dataset Converter", row0_text)
-        self.assertIn("2: Fine-Tuning Single Run", row0_text)
+        self.assertIn("2: Single Run", row0_text)
+        self.assertIn("3: Multi-Run Matrix", row0_text)
 
         # Inspect row 29 (bottom footer, max_y - 1)
         footer_calls = [

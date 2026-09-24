@@ -30,7 +30,7 @@ MLX Commander provides three dedicated operational modes accessible via TUI (`F2
 | Mode | Purpose | Key Capabilities |
 |---|---|---|
 | **Mode 1: Dataset Converter** | Ingest & standardize data | Schema auto-detection, multi-column concat (`+`), multi-file merging, 4 target MLX formats, reproducible seeds, manifest handshake. |
-| **Mode 2: Solo Runs** | Precision single-run tuning | 22+ explicit hyperparameters, VLM attention mask safeguards (`batch_size=1`, `grad_accum=N`), peak RAM & implied epochs estimation, validation loss milestones. |
+| **Mode 2: Single Run** | Precision single-run tuning | 22+ explicit hyperparameters, VLM attention mask safeguards (`batch_size=1`, `grad_accum=N`), peak RAM & implied epochs estimation, validation loss milestones. |
 | **Mode 3: Multi-Run Matrix** | Grid sweeps & batch queue | Single-line multi-condition syntax, Cartesian product grid expansion ($N_1 \times N_2 \dots$), sequential FIFO execution to prevent memory thrashing. |
 | **Evals: Test Set Generator [Experimental]** | Generative evaluation [Experimental] | Real token-by-token decoding on `test.jsonl`, physical memory-bandwidth speed model, Exact Match, Word F1, 2×2 Migration Matrix, offline HTML comparison dashboard, W&B tables. |
 
@@ -103,7 +103,7 @@ mlx_commander --tui --spawn-terminal \
 
 ---
 
-### 2. Solo Runs: Single-Run Fine-Tuning Orchestration (Mode 2)
+### 2. Training Ops: Single Run (Mode 2)
 
 #### Explicit Hyperparameters:
 MLX Commander makes all 22 fine-tuning hyperparameters explicit with robust Apple Silicon defaults:
@@ -157,7 +157,7 @@ When `valid.jsonl` is present in the dataset directory, MLX Commander automatica
 
 ---
 
-### 3. Multi-Run Matrix: Grid Sweeps & Queue Orchestration (Mode 3)
+### 3. Training Ops: Multi-Run Matrix (Mode 3)
 
 Mode 3 expands multi-condition sweeps into a visual Cartesian product grid and queues runs into a persistent FIFO queue (`mlx_runs/queue.json`).
 
@@ -264,4 +264,4 @@ MLX Commander provides an MCP tool suite over `stdio`. Agents can invoke these t
 | `execute_queue` | Runs the queue sequentially (spawns macOS Terminal or headless). | `queue_dir: str = "mlx_runs"`, `spawn_terminal: bool = True` |
 | `run_test_evaluation` | Executes post-training generative evaluation [Experimental] on `test.jsonl` and builds HTML dashboard. | `model`, `adapter_path`, `data_path`, `max_tokens: int = 128` |
 | `estimate_test_eval_throughput` | Computes model-dependent generation speed (tok/s) and evaluation duration [Experimental]. | `model_name`, `total_samples: int = 50`, `num_passes: int = 2` |
-| `launch_lora_tui` | Launches TUI directly in Mode 2 (Solo Runs) or Mode 3 (Multi-Run Matrix). | `mode: int = 2` (or `3`), `dataset_path`, `model`, `queue_dir` |
+| `launch_lora_tui` | Launches TUI directly in Mode 2 (Single Run) or Mode 3 (Multi-Run Matrix). | `mode: int = 2` (or `3`), `dataset_path`, `model`, `queue_dir` |

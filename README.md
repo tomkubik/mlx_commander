@@ -1,6 +1,6 @@
 # MLX_Commander 🚀
 
-The Norton Commander-style TUI, Headless CLI & Model Context Protocol (MCP) Orchestrator for Apple Silicon MLX Fine-Tuning Runs (Single Runs & Multi-Run Sweeps) and Hugging Face Dataset Preparation.
+The Norton Commander-style TUI, Headless CLI & Model Context Protocol (MCP) Suite for Apple Silicon MLX Training Ops (Single Run & Multi-Run Matrix) and Hugging Face Dataset Preparation.
 
 Built entirely in Python with zero mandatory dependencies and zero pre-compiled binaries.
 
@@ -18,26 +18,26 @@ MLX Commander transforms your Apple Silicon Mac into an autonomous, crash-proof 
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │                                 MLX COMMANDER WORKFLOW                                  │
 ├──────────────────────────┬─────────────────────────────────┬───────────────────────────┤
-│  1. DATASET CONVERSION   │  2. RUN ORCHESTRATION           │  3. GENERATIVE EVALS      │
-│     (Hugging Face → MLX) │     (Solo & Multi-Run Matrix)   │     [EXPERIMENTAL]        │
-│  • Parquet / Arrow / Hub │  • 🎯 Solo Runs (22 parameters) │  • 2-Pass Test Bench      │
+│  1. DATASET CONVERSION   │  2. TRAINING OPS                │  3. GENERATIVE EVALS      │
+│     (Hugging Face → MLX) │     (Single Run & Matrix)       │     [EXPERIMENTAL]        │
+│  • Parquet / Arrow / Hub │  • 🎯 Single Run (22 params)    │  • 2-Pass Test Bench      │
 │  • Auto Train/Val/Test   │  • 🚀 Multi-Run Matrix (Grid)   │  • Bandwidth-based ETA    │
 │  • 4 Standard Formats    │  • FIFO Queue (Zero OOM Panics) │  • Exact Match & Word F1  │
 │  • Concat (+) & Merging  │  • VLM Attention-Mask Shield    │  • Offline HTML Dashboard │
 └──────────────────────────┴─────────────────────────────────┴───────────────────────────┘
 ```
 
-### 🎛️ 1. Fine-Tuning Flight Deck: Solo Runs & Multi-Run Matrix
-*(Configuration & Orchestration of Single Runs and Multi-Run Hyperparameter Sweeps)*
+### 🎛️ 1. Training Ops: Single Run and Multi-Run Matrix
+*(Comprehensive Configuration & Execution for Apple Silicon MLX)*
 
-- **🎯 Solo Runs (Precision Single-Run Tuning — Mode 2)**:
+- **🎯 Single Run (Mode 2)**:
   - **Zero-Guesswork Parameter Matrix**: Explicit configuration of all 22 MLX fine-tuning hyperparameters (`learning_rate`, `batch_size`, `gradient_accumulation_steps`, `lora_rank`, `max_seq_length`, etc.) with tested production defaults.
   - **Crash-Proof VLM Safeguards**: Automatically detects Vision-Language models (`mlx-vlm` like Gemma 4, Qwen2-VL, PaliGemma) and enforces `batch_size=1` with equivalent gradient accumulation steps—permanently preventing attention mask shape broadcast crashes.
   - **Pre-Flight Memory Estimator**: Analytical calculation of peak Unified Memory (RAM) with real-time `[SAFE]`, `[TIGHT]`, and `[OOM RISK]` safety bands for your exact M-series chip.
   - **Live Validation Milestones**: Discovers `valid.jsonl` and streams validation loss checkpoints directly to the terminal (`★ [Validation Loss Milestone] Iter 100: Val loss = 1.234`).
   - **Implied Epochs Meter**: Computes dataset coverage with dark red warnings when $< 1.0$ epochs.
 
-- **🚀 Multi-Run Matrix (Grid Sweeps & Queue — Mode 3)**:
+- **🚀 Multi-Run Matrix (Mode 3)**:
   - **Visual Cartesian Parameter Grid**: Test hyperparameter permutations without writing brittle bash loops. Enter single-line conditions (`Learning Rate: [ 1e-4 ] [ 2e-4 ]`, `LoRA Rank: [ 8 ] [ 16 ]`) to instantly generate an interactive $N_1 \times N_2 \dots$ sweep matrix.
   - **Crash-Proof Sequential Queue (`--run-queue`)**: Protects Apple Silicon Unified Memory from OOM thrashing, swap exhaustion, and macOS kernel panics by strictly executing queued runs in sequential FIFO order.
   - **Detached Execution**: Spawns jobs in a separate macOS `Terminal.app` window so you can close the TUI or step away while runs execute.
@@ -78,8 +78,8 @@ MLX Commander transforms your Apple Silicon Mac into an autonomous, crash-proof 
 
 | Capability | Feature Name | What It Does | Why It Matters on Apple Silicon |
 |---|---|---|---|
-| **Single Run Tuning** | **🎯 Solo Runs (Mode 2)** | 22 explicit MLX parameters, live validation milestones, implied epochs | Eliminates guesswork; pre-flight RAM estimator prevents OOM crashes; VLM safeguards prevent attention mask errors. |
-| **Grid Search Sweeps** | **🚀 Multi-Run Matrix (Mode 3)** | Visual Cartesian grid ($N_1 \times N_2 \dots$), single-line conditions, FIFO queue | Sequential execution prevents Unified Memory thrashing, disk swap freezing, and macOS kernel panics. |
+| **Training Ops** | **🎯 Single Run (Mode 2)** | 22 explicit MLX parameters, live validation milestones, implied epochs | Eliminates guesswork; pre-flight RAM estimator prevents OOM crashes; VLM safeguards prevent attention mask errors. |
+| **Training Ops** | **🚀 Multi-Run Matrix (Mode 3)** | Visual Cartesian grid ($N_1 \times N_2 \dots$), single-line conditions, FIFO queue | Sequential execution prevents Unified Memory thrashing, disk swap freezing, and macOS kernel panics. |
 | **Evaluation Engine** | **🧪 Generative Evals [Experimental]** | Real token decoding on `test.jsonl`, baseline comparison, 3-tier reports | Unlike perplexity, tests actual generative capability; physics-grounded speed model predicts exact duration. |
 | **Data Ingestion** | **🔄 MLX Dataset Prep (Mode 1)** | Converts Parquet/Arrow/JSONL/Hub to 4 MLX formats with auto-splits | Instant formatting with multi-column concat (`+`), reproducible seeds, and zero mandatory external libraries. |
 | **Autonomous Control** | **🤖 MCP Server** | 8 native tools for AI coding agents over stdio | Agents can evaluate RAM, configure sweeps, and run training queues without manual UI clicking. |
@@ -115,13 +115,13 @@ uv tool install mlx_commander
 MLX Commander features a 3-mode switcher (`F2` inside the TUI or via command-line flags):
 
 ```bash
-# 1. Launch directly into Solo Runs (Mode 2: Single-Run Fine-Tuning)
+# 1. Launch directly into Mode 2 (Single Run)
 mlx_commander --lora
 
-# 2. Launch directly into Multi-Run Matrix (Mode 3: Grid Sweeps & Queue)
+# 2. Launch directly into Mode 3 (Multi-Run Matrix)
 mlx_commander --multi-run
 
-# 3. Launch directly into Dataset Converter (Mode 1: Default)
+# 3. Launch directly into Mode 1: Dataset Converter (Default)
 mlx_commander
 
 # 4. Execute all queued runs sequentially in an external window:
@@ -152,9 +152,9 @@ python3 -m mlx_commander --run-queue ./mlx_runs
 
 ---
 
-## 🎛️ Mode 2: Solo Runs (Single-Run Fine-Tuning)
+## 🎛️ Mode 2: Single Run
 
-Press **`[F2]`** inside the TUI or pass `--lora` from the command line to enter **Solo Runs Mode**.
+Press **`[F2]`** inside the TUI or pass `--lora` from the command line to enter **Single Run Mode**.
 
 ```bash
 mlx_commander --lora
@@ -206,7 +206,7 @@ When `valid.jsonl` is present in the dataset folder, MLX Commander automatically
 
 ---
 
-## 🚀 Mode 3: Multi-Run Matrix (Grid Sweeps & Queue)
+## 🚀 Mode 3: Multi-Run Matrix
 
 Press **`[F2]`** inside the TUI or pass `--multi-run` from the command line to switch to **Multi-Run Matrix Mode**.
 
@@ -457,8 +457,8 @@ usage: mlx_commander [-h] [-v] [-d DATASET [DATASET ...]]
 
 | Flag | Category | Description |
 |---|---|---|
-| `--lora` | Mode Switcher | Launch directly into Mode 2 (Fine-Tuning Single Run). |
-| `--multi-run` | Mode Switcher | Launch directly into Mode 3 (Fine-Tuning Multi-Run Sweeps). |
+| `--lora` | Mode Switcher | Launch directly into Mode 2 (Single Run). |
+| `--multi-run` | Mode Switcher | Launch directly into Mode 3 (Multi-Run Matrix). |
 | `--run-queue [DIR]` | Execution | Execute queued fine-tuning runs sequentially (default: `mlx_runs`). |
 | `-d`, `--dataset` | Data Ingestion | Path to dataset directory or file (`.parquet`, `.jsonl`, `.arrow`, `.csv`, `.sqlite`). |
 | `-f`, `--format` | Data Ingestion | Target format (`prompt_completion`, `chat`, `text`, `dpo`). |
