@@ -31,7 +31,7 @@ MLX Commander provides three dedicated operational modes accessible via TUI (`F2
 |---|---|---|
 | **Mode 1: Dataset Converter** | Ingest & standardize data | Schema auto-detection, multi-column concat (`+`), multi-file merging, 4 target MLX formats, reproducible seeds, manifest handshake. |
 | **Mode 2: Single Run** | Precision single-run tuning | 22+ explicit hyperparameters, VLM attention mask safeguards (`batch_size=1`, `grad_accum=N`), peak RAM & implied epochs estimation, validation loss milestones. |
-| **Mode 3: Multi-Run Matrix** | Grid sweeps & batch queue | Single-line multi-condition syntax, Cartesian product grid expansion ($N_1 \times N_2 \dots$), sequential FIFO execution to prevent memory thrashing. |
+| **Mode 3: Multi-Run Matrix** | Plan & schedule experiments | Single-line multi-condition syntax, Cartesian product grid expansion ($N_1 \times N_2 \dots$), sequential FIFO execution to prevent memory thrashing. |
 | **Evals: Test Set Generator [Experimental]** | Generative evaluation [Experimental] | Real token-by-token decoding on `test.jsonl`, physical memory-bandwidth speed model, Exact Match, Word F1, 2×2 Migration Matrix, offline HTML comparison dashboard, W&B tables. |
 
 ---
