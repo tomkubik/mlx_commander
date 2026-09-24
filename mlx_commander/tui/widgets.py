@@ -1223,8 +1223,8 @@ def show_help_dialog(stdscr: curses.window) -> None:
         ("← / → (or h / l)", "Navigate horizontally between columns"),
         ("Enter / Space", "Edit field, toggle value, or load queued run"),
         ("F3", "Open macOS Finder to choose output destination folder"),
-        ("F5", "Run conversion (Mode 1) or Execute Queue (Mode 2 & 3)"),
-        ("F6", "Add current configuration to Queue (Mode 2 & 3)"),
+        ("F5", "Run immediately with current config or Execute Queue (Mode 2 & 3)"),
+        ("F6", "Schedule current configuration to Queue (Mode 2 & 3)"),
         ("c", "Clone selected LoRA run in Queue (Mode 2)"),
         ("d", "Delete selected LoRA run from Queue (Mode 2)"),
         ("x", "Clear LoRA Queue (Mode 2)"),
@@ -1667,7 +1667,7 @@ def draw_queue_table(
     avail_rows = h - 1
 
     if not runs:
-        safe_addstr(win, header_y, x + 2, "(Queue is empty. Configure parameters above and press [+ Add to Queue (F6)] to stage runs)", (get_color(COLOR_LABEL_GRAY) | curses.A_DIM) if safe_has_colors() else curses.A_DIM)
+        safe_addstr(win, header_y, x + 2, "(Queue is empty. Press [F5] to run current configuration, or [F6] to schedule)", (get_color(COLOR_LABEL_GRAY) | curses.A_DIM) if safe_has_colors() else curses.A_DIM)
         return selected_idx
 
     # Use 2-row stride so every run displays its config spec underneath

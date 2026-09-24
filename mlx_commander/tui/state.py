@@ -89,7 +89,7 @@ class CommanderState:
     selected_column_idx: int = 0
 
     # Status / notification
-    status_message: str = "Ready. Configure hyperparameters, [F6] Add to Queue, or [F5] Run."
+    status_message: str = "Ready. Configure hyperparameters, [F5] Run, or [F6] Schedule to Queue."
     status_is_error: bool = False
 
     # Reactive preview cache

@@ -12,6 +12,9 @@ from mlx_commander.evals.metrics import (
     compute_exact_match,
     compute_substring_match,
     compute_word_metrics,
+    format_cli_categorical_confusion_matrix,
+    format_cli_eval_summary_matrices,
+    format_cli_migration_matrix,
     normalize_answer,
 )
 from mlx_commander.evals.runner import (
@@ -118,6 +121,34 @@ class TestEvalMetrics(unittest.TestCase):
         self.assertEqual(cm["matrix"]["neutral"]["neutral"], 1)
         self.assertEqual(cm["accuracy"], 80.0)
 
+    def test_format_cli_migration_matrix(self):
+        transitions = [
+            "PRESERVED", "PRESERVED",
+            "FIXED", "FIXED", "FIXED",
+            "REGRESSED",
+            "PERSISTENT_FAIL",
+        ]
+        mat = build_migration_matrix(transitions)
+        formatted = format_cli_migration_matrix(mat)
+        self.assertIn("MODEL CONFUSION & MIGRATION MATRIX", formatted)
+        self.assertIn("POST-TUNING (LoRA)", formatted)
+        self.assertIn("PRESERVED:    2", formatted)
+        self.assertIn("FIXED:        3", formatted)
+        self.assertIn("REGRESSED:    1", formatted)
+        self.assertIn("PERSISTENT:   1", formatted)
+        self.assertIn("Net Model Accuracy Gain:     +2 (+28.6%)", formatted)
+
+    def test_format_cli_categorical_confusion_matrix(self):
+        ground_truths = ["positive", "positive", "negative", "neutral", "positive"]
+        predictions = ["positive", "neutral", "negative", "neutral", "positive"]
+        cm = build_confusion_matrix(ground_truths, predictions)
+        formatted = format_cli_categorical_confusion_matrix(cm)
+        self.assertIn("CATEGORICAL CONFUSION MATRIX", formatted)
+        self.assertIn("Actual \\ Pred", formatted)
+        self.assertIn("Recall", formatted)
+        self.assertIn("positive", formatted)
+        self.assertIn("Categorical Accuracy: 80.0%", formatted)
+
 
 class TestEvalStorageAndRunner(unittest.TestCase):
     def setUp(self):
@@ -202,6 +233,85 @@ class TestEvalStorageAndRunner(unittest.TestCase):
             self.assertIn("MLX Commander :: Generative Eval Dashboard", html_text)
             self.assertIn("Regressed (Model Broke)", html_text)
             self.assertIn("01_test_run", html_text)
+            self.assertIn("Model Confusion Map & Migration Matrix", html_text)
+            self.assertIn("quadrant-tile", html_text)
+            self.assertIn("tile-preserved", html_text)
+            self.assertIn("tile-fixed", html_text)
+            self.assertIn("tile-regressed", html_text)
+            self.assertIn("POST-TUNING (LoRA)", html_text)
+            self.assertIn("BASELINE", html_text)
+            self.assertIn("initConfusionMap", html_text)
+
+    def test_run_generative_eval_cli_displays_confusion_matrix(self):
+        ds_dir = self.base_path / "dataset_cli_matrix"
+        ds_dir.mkdir()
+        test_file = ds_dir / "test.jsonl"
+        with open(test_file, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"prompt": "Q1", "completion": "A1"}) + "\n")
+            f.write(json.dumps({"prompt": "Q2", "completion": "A2"}) + "\n")
+
+        adapters_dir = self.base_path / "adapters" / "03_matrix_run"
+        cfg = LoraRunConfig(
+            name="03_matrix_run",
+            data=str(ds_dir),
+            adapter_path=str(adapters_dir),
+            run_eval=True,
+        )
+
+        out_buf = io.StringIO()
+        with patch("sys.stdout", out_buf):
+            run_generative_eval(
+                config=cfg,
+                data_path=ds_dir,
+                mock_predictions=["A1", "A2"],
+                mock_baseline=["Wrong", "A2"],
+            )
+
+        printed = out_buf.getvalue()
+        self.assertIn("MODEL CONFUSION & MIGRATION MATRIX", printed)
+        self.assertIn("PRESERVED:", printed)
+        self.assertIn("FIXED:", printed)
+        self.assertIn("REGRESSED:", printed)
+        self.assertIn("Net Model Accuracy Gain:", printed)
+
+    def test_html_dashboard_confusion_matrix_elements(self):
+        html_out = self.base_path / "custom_dashboard.html"
+        mock_summary = {
+            "run_id": "test_run",
+            "run_name": "Test Run",
+            "exact_match_pct": 80.0,
+            "avg_word_f1": 0.85,
+            "fixed_count": 4,
+            "regressed_count": 1,
+            "migration_matrix": {
+                "total": 10,
+                "counts": {"PRESERVED": 4, "FIXED": 4, "REGRESSED": 1, "PERSISTENT_FAIL": 1},
+                "percentages": {"PRESERVED": 40.0, "FIXED": 40.0, "REGRESSED": 10.0, "PERSISTENT_FAIL": 10.0},
+            },
+            "confusion_matrix": {
+                "is_categorical": True,
+                "classes": ["neg", "pos"],
+                "matrix": {"neg": {"neg": 4, "pos": 1}, "pos": {"neg": 0, "pos": 5}},
+                "accuracy": 90.0,
+                "total_samples": 10,
+            },
+        }
+
+        generate_html_dashboard(
+            dashboard_path=html_out,
+            current_run_summary=mock_summary,
+            current_predictions=[],
+        )
+
+        self.assertTrue(html_out.exists())
+        with open(html_out, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("Model Confusion Map & Migration Matrix", content)
+        self.assertIn("Categorical Confusion Matrix", content)
+        self.assertIn("categoricalCmTable", content)
+        self.assertIn("initConfusionMap", content)
+        self.assertIn("Net Model Gain:", content)
 
     def test_run_inference_batch_milestone_output(self):
         prompts = ["Question 1", "Question 2", "Question 3"]

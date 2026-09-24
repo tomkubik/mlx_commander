@@ -9,6 +9,9 @@ from .metrics import (
     compute_exact_match,
     compute_substring_match,
     compute_word_metrics,
+    format_cli_categorical_confusion_matrix,
+    format_cli_eval_summary_matrices,
+    format_cli_migration_matrix,
     normalize_answer,
 )
 from .runner import load_test_dataset, run_generative_eval
@@ -25,6 +28,9 @@ __all__ = [
     "classify_transition",
     "build_migration_matrix",
     "build_confusion_matrix",
+    "format_cli_migration_matrix",
+    "format_cli_categorical_confusion_matrix",
+    "format_cli_eval_summary_matrices",
     "normalize_answer",
     "load_test_dataset",
     "run_generative_eval",

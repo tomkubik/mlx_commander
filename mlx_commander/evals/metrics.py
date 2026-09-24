@@ -180,3 +180,107 @@ def build_confusion_matrix(
         "accuracy": accuracy,
         "total_samples": len(ground_truths),
     }
+
+
+def format_cli_migration_matrix(migration_matrix: Dict[str, Any]) -> str:
+    """
+    Format 2x2 Model Migration & Regression Matrix into a clear, aligned ASCII box.
+    """
+    if not migration_matrix:
+        return ""
+    counts = migration_matrix.get("counts", {})
+    pcts = migration_matrix.get("percentages", {})
+    total = migration_matrix.get("total", 0)
+
+    pres_c = counts.get("PRESERVED", 0)
+    pres_p = pcts.get("PRESERVED", 0.0)
+    regr_c = counts.get("REGRESSED", 0)
+    regr_p = pcts.get("REGRESSED", 0.0)
+    fix_c = counts.get("FIXED", 0)
+    fix_p = pcts.get("FIXED", 0.0)
+    fail_c = counts.get("PERSISTENT_FAIL", 0)
+    fail_p = pcts.get("PERSISTENT_FAIL", 0.0)
+
+    net_gain = fix_c - regr_c
+    net_gain_pct = round((net_gain / max(1, total)) * 100.0, 1)
+    sign = "+" if net_gain >= 0 else ""
+
+    lines = [
+        "======================================================================",
+        "                 MODEL CONFUSION & MIGRATION MATRIX                   ",
+        "               (Pre-Trained Baseline vs Post-Tuning LoRA)             ",
+        "======================================================================",
+        "                              POST-TUNING (LoRA)                      ",
+        "                           CORRECT             WRONG                  ",
+        "                     ┌──────────────────┬──────────────────┐          ",
+        f"           CORRECT   │  PRESERVED: {pres_c:>4} │  REGRESSED: {regr_c:>4} │  ◄ Catastrophic forgetting",
+        f"BASELINE             │     ({pres_p:>5.1f}%)    │     ({regr_p:>5.1f}%)    │          ",
+        "                     ├──────────────────┼──────────────────┤          ",
+        f"           WRONG     │  FIXED:     {fix_c:>4} │  PERSISTENT:{fail_c:>4} │  ◄ Where LoRA healed model",
+        f"                     │     ({fix_p:>5.1f}%)    │     ({fail_p:>5.1f}%)    │          ",
+        "                     └──────────────────┴──────────────────┘          ",
+        f"  • Preserved (both correct):    {pres_c:>4} ({pres_p:.1f}%)",
+        f"  • Fixed (LoRA healed):         {fix_c:>4} ({fix_p:.1f}%)",
+        f"  • Regressed (model broke):      {regr_c:>4} ({regr_p:.1f}%)",
+        f"  • Persistent Fail (both fail): {fail_c:>4} ({fail_p:.1f}%)",
+        f"  • Net Model Accuracy Gain:     {sign}{net_gain} ({sign}{net_gain_pct:.1f}%)",
+        "======================================================================",
+    ]
+    return "\n".join(lines)
+
+
+def format_cli_categorical_confusion_matrix(cm: Optional[Dict[str, Any]]) -> str:
+    """
+    Format Categorical Confusion Matrix ([Actual] x [Predicted]) into an ASCII table.
+    """
+    if not cm or not cm.get("is_categorical"):
+        return ""
+    classes = cm.get("classes", [])
+    matrix = cm.get("matrix", {})
+    if not classes or not matrix:
+        return ""
+
+    has_other = any(matrix.get(c, {}).get("other", 0) > 0 for c in classes)
+    pred_cols = list(classes) + (["other"] if has_other else [])
+
+    max_cls_len = max(len(str(c)) for c in classes)
+    col_w = max(9, max_cls_len + 2)
+    label_w = max(16, max_cls_len + 2)
+
+    lines = [
+        "----------------------------------------------------------------------",
+        "           CATEGORICAL CONFUSION MATRIX (ACTUAL × PREDICTED)          ",
+        "----------------------------------------------------------------------",
+    ]
+
+    header_cols = "".join(f"{c:>{col_w}}" for c in pred_cols)
+    actual_pred_hdr = "Actual \\ Pred"
+    lines.append(f"{actual_pred_hdr:<{label_w}}{header_cols}{'Recall':>{col_w}}")
+    lines.append("-" * (label_w + (len(pred_cols) + 1) * col_w))
+
+    for c in classes:
+        row_counts = matrix.get(c, {})
+        c_total = sum(row_counts.values())
+        c_correct = row_counts.get(c, 0)
+        c_recall = (c_correct / c_total * 100.0) if c_total > 0 else 0.0
+        cells = "".join(f"{row_counts.get(p, 0):>{col_w}}" for p in pred_cols)
+        lines.append(f"{c:<{label_w}}{cells}{f'{c_recall:.1f}%':>{col_w}}")
+
+    lines.append("-" * (label_w + (len(pred_cols) + 1) * col_w))
+    accuracy = cm.get("accuracy", 0.0)
+    total_samples = cm.get("total_samples", 0)
+    lines.append(f"  • Categorical Accuracy: {accuracy:.1f}% ({total_samples} samples across {len(classes)} classes)")
+    lines.append("======================================================================")
+    return "\n".join(lines)
+
+
+def format_cli_eval_summary_matrices(summary: Dict[str, Any]) -> str:
+    """Format all available evaluation matrices for CLI display."""
+    chunks: List[str] = []
+    mig = summary.get("migration_matrix")
+    if mig:
+        chunks.append(format_cli_migration_matrix(mig))
+    cm = summary.get("confusion_matrix")
+    if cm and cm.get("is_categorical"):
+        chunks.append(format_cli_categorical_confusion_matrix(cm))
+    return "\n\n".join(chunks)

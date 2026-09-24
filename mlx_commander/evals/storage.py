@@ -235,6 +235,163 @@ def generate_html_dashboard(
   .sample-row {{ margin-bottom: 6px; }}
   .sample-lbl {{ font-weight: bold; color: var(--dim); display: inline-block; width: 120px; }}
   .code-text {{ font-family: monospace; white-space: pre-wrap; word-break: break-word; }}
+
+  /* Model Confusion Map & Migration Matrix */
+  .confusion-container {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    align-items: stretch;
+  }}
+  .quadrant-box {{
+    flex: 1 1 500px;
+    background: #090d13;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+  }}
+  .quadrant-axis-top {{
+    text-align: center;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: var(--dim);
+    margin-bottom: 8px;
+    padding-left: 90px;
+    text-transform: uppercase;
+  }}
+  .quadrant-main {{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }}
+  .quadrant-axis-left {{
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: var(--dim);
+    text-align: center;
+    text-transform: uppercase;
+  }}
+  .quadrant-grid {{
+    display: grid;
+    grid-template-columns: 80px 1fr 1fr;
+    grid-template-rows: 26px 130px 130px;
+    gap: 8px;
+    flex: 1;
+  }}
+  .quadrant-col-hdr, .quadrant-row-hdr {{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--dim);
+    background: #21262d;
+    border-radius: 4px;
+  }}
+  .quadrant-tile {{
+    background: #161b22;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.15s ease-in-out;
+    position: relative;
+    user-select: none;
+    text-align: center;
+  }}
+  .quadrant-tile:hover {{
+    transform: translateY(-2px);
+    border-color: var(--accent);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  }}
+  .tile-preserved {{
+    border-left: 4px solid var(--success);
+  }}
+  .tile-regressed {{
+    border-left: 4px solid var(--danger);
+    background: rgba(248, 81, 73, 0.05);
+  }}
+  .tile-fixed {{
+    border-left: 4px solid var(--accent);
+    background: rgba(88, 166, 255, 0.05);
+  }}
+  .tile-persistent {{
+    border-left: 4px solid var(--warning);
+  }}
+  .quadrant-badge {{
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }}
+  .badge-preserved {{ color: var(--success); }}
+  .badge-regressed {{ color: var(--danger); }}
+  .badge-fixed {{ color: var(--accent); }}
+  .badge-persistent {{ color: var(--warning); }}
+
+  .quadrant-count {{
+    font-size: 26px;
+    font-weight: 800;
+    color: var(--text-bright);
+    line-height: 1.1;
+  }}
+  .quadrant-pct {{
+    font-size: 12px;
+    color: var(--dim);
+    margin-bottom: 4px;
+  }}
+  .quadrant-desc {{
+    font-size: 11px;
+    color: var(--dim);
+    line-height: 1.2;
+  }}
+
+  /* Categorical Confusion Table */
+  .cm-table-wrapper {{
+    flex: 1 1 380px;
+    background: #090d13;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+  }}
+  .cm-table {{
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }}
+  .cm-table th, .cm-table td {{
+    padding: 6px 10px;
+    text-align: center;
+    border: 1px solid var(--border);
+  }}
+  .cm-table th {{
+    background: #21262d;
+    color: var(--text-bright);
+  }}
+  .cm-diag {{
+    background: rgba(63, 185, 80, 0.2);
+    font-weight: bold;
+    color: var(--success);
+  }}
+  .cm-err {{
+    background: rgba(248, 81, 73, 0.15);
+    color: var(--danger);
+    font-weight: bold;
+  }}
+  .cm-dim {{
+    color: var(--dim);
+    opacity: 0.5;
+  }}
 </style>
 </head>
 <body>
@@ -248,6 +405,71 @@ def generate_html_dashboard(
 </header>
 
 <div class="grid-4" id="statsGrid"></div>
+
+<!-- Model Confusion Map & Migration Matrix Card -->
+<div class="card" id="confusionMapCard">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px;">
+    <div>
+      <h3 style="color: var(--text-bright); font-size: 18px;">Model Confusion Map & Migration Matrix</h3>
+      <div style="font-size: 13px; color: var(--dim); margin-top: 2px;">
+        Comparing Pre-Trained Baseline vs Post-Tuning (LoRA). Click any quadrant to filter predictions below.
+      </div>
+    </div>
+    <div id="netGainContainer" style="display: flex; gap: 8px;"></div>
+  </div>
+
+  <div class="confusion-container">
+    <div class="quadrant-box">
+      <div class="quadrant-axis-top">POST-TUNING (LoRA)</div>
+      <div class="quadrant-main">
+        <div class="quadrant-axis-left">BASELINE</div>
+        <div class="quadrant-grid">
+          <div></div>
+          <div class="quadrant-col-hdr">CORRECT</div>
+          <div class="quadrant-col-hdr">WRONG</div>
+
+          <div class="quadrant-row-hdr">CORRECT</div>
+          <div class="quadrant-tile tile-preserved" onclick="setFilter('PRESERVED')">
+            <div class="quadrant-badge badge-preserved">PRESERVED</div>
+            <div class="quadrant-count" id="countPreserved">0</div>
+            <div class="quadrant-pct" id="pctPreserved">(0.0%)</div>
+            <div class="quadrant-desc">Both Correct</div>
+          </div>
+          <div class="quadrant-tile tile-regressed" onclick="setFilter('REGRESSED')">
+            <div class="quadrant-badge badge-regressed">REGRESSED &bull; ⚠️ Forgetting</div>
+            <div class="quadrant-count" style="color: var(--danger);" id="countRegressed">0</div>
+            <div class="quadrant-pct" id="pctRegressed">(0.0%)</div>
+            <div class="quadrant-desc">Baseline OK &rarr; LoRA Broke</div>
+          </div>
+
+          <div class="quadrant-row-hdr">WRONG</div>
+          <div class="quadrant-tile tile-fixed" onclick="setFilter('FIXED')">
+            <div class="quadrant-badge badge-fixed">FIXED &bull; ❇️ Healed</div>
+            <div class="quadrant-count" style="color: var(--accent);" id="countFixed">0</div>
+            <div class="quadrant-pct" id="pctFixed">(0.0%)</div>
+            <div class="quadrant-desc">Baseline Broke &rarr; LoRA Healed</div>
+          </div>
+          <div class="quadrant-tile tile-persistent" onclick="setFilter('PERSISTENT_FAIL')">
+            <div class="quadrant-badge badge-persistent">PERSISTENT FAIL</div>
+            <div class="quadrant-count" style="color: var(--warning);" id="countPersistent">0</div>
+            <div class="quadrant-pct" id="pctPersistent">(0.0%)</div>
+            <div class="quadrant-desc">Both Failed (Hard Samples)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cm-table-wrapper" id="categoricalCmWrapper" style="display: none;">
+      <h4 style="color: var(--text-bright); margin-bottom: 4px; font-size: 14px;">Categorical Confusion Matrix</h4>
+      <div style="font-size: 12px; color: var(--dim); margin-bottom: 10px;">[Actual Ground Truth] &times; [Predicted Class]</div>
+      <table class="cm-table" id="categoricalCmTable">
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+      <div id="cmAccuracySummary" style="font-size: 12px; color: var(--dim); margin-top: 8px;"></div>
+    </div>
+  </div>
+</div>
 
 <div class="card">
   <h3 style="margin-bottom: 12px; color: var(--text-bright);">Evaluation Leaderboard (All Runs)</h3>
@@ -312,6 +534,104 @@ def generate_html_dashboard(
     `;
   }}
 
+  function initConfusionMap() {{
+    const mig = currentSummary.migration_matrix || {{}};
+    const counts = mig.counts || {{}};
+    const pcts = mig.percentages || {{}};
+
+    const presC = counts.PRESERVED || 0;
+    const regrC = counts.REGRESSED || 0;
+    const fixC = counts.FIXED || 0;
+    const failC = counts.PERSISTENT_FAIL || 0;
+
+    document.getElementById('countPreserved').textContent = presC;
+    document.getElementById('pctPreserved').textContent = `(${{(pcts.PRESERVED || 0).toFixed(1)}}%)`;
+
+    document.getElementById('countRegressed').textContent = regrC;
+    document.getElementById('pctRegressed').textContent = `(${{(pcts.REGRESSED || 0).toFixed(1)}}%)`;
+
+    document.getElementById('countFixed').textContent = fixC;
+    document.getElementById('pctFixed').textContent = `(${{(pcts.FIXED || 0).toFixed(1)}}%)`;
+
+    document.getElementById('countPersistent').textContent = failC;
+    document.getElementById('pctPersistent').textContent = `(${{(pcts.PERSISTENT_FAIL || 0).toFixed(1)}}%)`;
+
+    const netGain = fixC - regrC;
+    const total = mig.total || (presC + regrC + fixC + failC) || 1;
+    const netGainPct = ((netGain / total) * 100).toFixed(1);
+    const sign = netGain >= 0 ? '+' : '';
+    const badgeColor = netGain >= 0 ? 'var(--success)' : 'var(--danger)';
+    const badgeBg = netGain >= 0 ? '#3fb95022' : '#f8514922';
+    const badgeBorder = netGain >= 0 ? '#3fb95055' : '#f8514955';
+
+    document.getElementById('netGainContainer').innerHTML = `
+      <div style="background: ${{badgeBg}}; color: ${{badgeColor}}; border: 1px solid ${{badgeBorder}}; padding: 4px 10px; border-radius: 12px; font-size: 13px; font-weight: bold;">
+        Net Model Gain: ${{sign}}${{netGain}} (${{sign}}${{netGainPct}}%)
+      </div>
+    `;
+
+    // Categorical Confusion Matrix
+    const cm = currentSummary.confusion_matrix;
+    if (cm && cm.is_categorical && cm.classes && cm.classes.length > 0) {{
+      const wrapper = document.getElementById('categoricalCmWrapper');
+      wrapper.style.display = 'block';
+
+      const classes = cm.classes;
+      const matrix = cm.matrix || {{}};
+
+      let hasOther = false;
+      for (const c of classes) {{
+        if (matrix[c] && matrix[c]['other'] > 0) {{
+          hasOther = true;
+          break;
+        }}
+      }}
+      const predCols = classes.concat(hasOther ? ['other'] : []);
+
+      const thead = document.querySelector('#categoricalCmTable thead');
+      thead.innerHTML = `
+        <tr>
+          <th style="text-align: left;">Actual \\ Pred</th>
+          ${{predCols.map(c => `<th>${{escapeHtml(c)}}</th>`).join('')}}
+          <th>Recall</th>
+        </tr>
+      `;
+
+      const tbody = document.querySelector('#categoricalCmTable tbody');
+      tbody.innerHTML = classes.map(actual => {{
+        const row = matrix[actual] || {{}};
+        let rowSum = 0;
+        for (const p of predCols) {{
+          rowSum += (row[p] || 0);
+        }}
+        const correct = row[actual] || 0;
+        const recall = rowSum > 0 ? ((correct / rowSum) * 100).toFixed(1) + '%' : '0.0%';
+
+        const cells = predCols.map(pred => {{
+          const val = row[pred] || 0;
+          let cellClass = 'cm-dim';
+          if (pred === actual) {{
+            cellClass = val > 0 ? 'cm-diag' : 'cm-dim';
+          }} else if (val > 0) {{
+            cellClass = 'cm-err';
+          }}
+          return `<td class="${{cellClass}}">${{val}}</td>`;
+        }}).join('');
+
+        return `
+          <tr>
+            <td style="text-align: left; font-weight: 600; color: var(--text-bright);">${{escapeHtml(actual)}}</td>
+            ${{cells}}
+            <td style="font-weight: bold; color: var(--accent);">${{recall}}</td>
+          </tr>
+        `;
+      }}).join('');
+
+      document.getElementById('cmAccuracySummary').textContent =
+        `Categorical Accuracy: ${{cm.accuracy}}% (${{cm.total_samples}} samples across ${{classes.length}} classes)`;
+    }}
+  }}
+
   function initLeaderboard() {{
     const tbody = document.querySelector('#leaderboardTable tbody');
     if (!leaderboard.length) {{
@@ -339,9 +659,22 @@ def generate_html_dashboard(
 
   function setFilter(filter) {{
     activeFilter = filter;
-    document.querySelectorAll('#filterBar .btn').forEach(b => b.classList.remove('active'));
-    event.target.classList.add('active');
+    document.querySelectorAll('#filterBar .btn').forEach(b => {{
+      b.classList.remove('active');
+      const text = b.textContent.toUpperCase();
+      if ((filter === 'ALL' && text.includes('ALL')) ||
+          (filter === 'REGRESSED' && text.includes('REGRESSED')) ||
+          (filter === 'FIXED' && text.includes('FIXED')) ||
+          (filter === 'PRESERVED' && text.includes('PRESERVED')) ||
+          (filter === 'PERSISTENT_FAIL' && text.includes('PERSISTENT'))) {{
+        b.classList.add('active');
+      }}
+    }});
     renderSamples();
+    const filterElem = document.getElementById('filterBar');
+    if (filterElem && window.scrollY < filterElem.offsetTop - 300) {{
+      filterElem.scrollIntoView({{ behavior: 'smooth' }});
+    }}
   }}
 
   function renderSamples() {{
@@ -381,6 +714,7 @@ def generate_html_dashboard(
   }}
 
   initStats();
+  initConfusionMap();
   initLeaderboard();
   renderSamples();
 </script>

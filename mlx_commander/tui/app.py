@@ -429,7 +429,7 @@ def execute_lora_queue_action(stdscr: curses.window, state: CommanderState) -> N
         show_error_dialog(
             stdscr,
             "Queue Empty",
-            "The LoRA queue is empty. Configure parameters and press [F6] to add runs before executing.",
+            "The LoRA queue is empty. Configure parameters and press [F5] to run immediately or [F6] to schedule.",
         )
         return
 
@@ -438,7 +438,7 @@ def execute_lora_queue_action(stdscr: curses.window, state: CommanderState) -> N
         show_error_dialog(
             stdscr,
             "No Pending Runs",
-            "All runs in the queue have already completed. Add a new run [F6] or clone an existing run [c].",
+            "All runs in the queue have already completed. Configure new parameters and press [F5] to run, or press [F6] to schedule.",
         )
         return
 
@@ -1383,7 +1383,7 @@ def _handle_mode1_input(
             elif state.left_focus_idx == 0:
                 state.mode_switcher_focused = True
                 state.mode_switcher_idx = state.active_tab
-                state.status_message = "Mode Switcher: Use [←/→] to select mode, [Enter] to switch, [↓] to return to pane."
+                state.status_message = "Mode Switcher: Use [←/→] to select mode, [Enter] to switch, [↓] to top, [↑] to bottom."
                 state.status_is_error = False
         elif key in (curses.KEY_LEFT, ord("h")):
             if state.left_focus_idx == 1 and state.selected_column_idx > 0:
@@ -1602,7 +1602,7 @@ def _handle_mode2_input(
             if state.lora_left_focus_idx == 0:
                 state.mode_switcher_focused = True
                 state.mode_switcher_idx = state.active_tab
-                state.status_message = "Mode Switcher: Use [←/→] to select mode, [Enter] to switch, [↓] to return to pane."
+                state.status_message = "Mode Switcher: Use [←/→] to select mode, [Enter] to switch, [↓] to top, [↑] to bottom."
                 state.status_is_error = False
             else:
                 state.lora_left_focus_idx -= 1
@@ -1874,7 +1874,7 @@ def _handle_mode3_input(
             if state.multi_left_focus_idx == 0:
                 state.mode_switcher_focused = True
                 state.mode_switcher_idx = state.active_tab
-                state.status_message = "Mode Switcher: Use [←/→] to select mode, [Enter] to switch, [↓] to return to pane."
+                state.status_message = "Mode Switcher: Use [←/→] to select mode, [Enter] to switch, [↓] to top, [↑] to bottom."
                 state.status_is_error = False
             else:
                 state.multi_left_focus_idx -= 1
@@ -2137,7 +2137,7 @@ def run_commander_tui(
         safe_addstr(stdscr, 0, x_m3, mode3_title, m3_attr)
 
         if state.mode_switcher_focused:
-            hint = "Navigate: [←/→]  Confirm: [Enter]  Return: [↓]"
+            hint = "Navigate: [←/→]  Confirm: [Enter]  Return: [↓/↑]"
             if max_x >= x_m3 + len(mode3_title) + len(hint) + 3:
                 safe_addstr(stdscr, 0, max_x - len(hint) - 2, hint, (get_color(COLOR_TITLE_ACCENT) | curses.A_BOLD) if curses.has_colors() else curses.A_BOLD)
 
@@ -2323,6 +2323,19 @@ def run_commander_tui(
                     else:
                         state.multi_active_panel = "left"
                         state.multi_left_focus_idx = 0
+                elif key in (curses.KEY_UP, ord("k")):  # Up: jump to bottom-most functionality on screen
+                    state.mode_switcher_focused = False
+                    state.mode_switcher_idx = state.active_tab
+                    if state.active_tab == 0:
+                        state.active_panel = ActivePanel.RIGHT
+                        mapping_fields = state.get_mapping_fields_for_format()
+                        state.right_focus_idx = 10 + len(mapping_fields)
+                    elif state.active_tab == 1:
+                        state.lora_active_panel = "queue"
+                        num_runs = len(state.queue_manager.runs) if state.queue_manager else 0
+                        state.selected_queue_idx = max(0, num_runs - 1)
+                    else:
+                        state.multi_active_panel = "sweep"
                 elif key in (10, 13, curses.KEY_ENTER, 32):  # Enter: confirm switching modes
                     state.switch_mode(state.mode_switcher_idx)
                     state.mode_switcher_focused = False
@@ -2364,6 +2377,16 @@ def run_commander_tui(
                     if res is not None:
                         conversion_result = res
                 elif state.active_tab == 1:
+                    if not state.queue_manager or not state.queue_manager.get_pending_runs():
+                        if not validate_lora_queue_preconditions(stdscr, state.lora_config.model, state.lora_config.data, config=state.lora_config):
+                            continue
+                        state.update_deterministic_lora_name()
+                        state.clear_estimates_cache()
+                        from mlx_commander.lora.model_info import normalize_model_path
+                        healed = normalize_model_path(state.lora_config.model)
+                        if healed and Path(healed).exists():
+                            state.lora_config.model = healed
+                        state.add_current_lora_to_queue()
                     execute_lora_queue_action(stdscr, state)
                 else:
                     if not state.queue_manager or not state.queue_manager.get_pending_runs():

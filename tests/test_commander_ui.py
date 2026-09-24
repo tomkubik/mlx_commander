@@ -1295,6 +1295,109 @@ class TestCommanderUI(unittest.TestCase):
         self.assertIn("Runtime Estimates", all_text)
         self.assertIn("Fine-Tuning Queue", all_text)
 
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_mode_switcher_up_arrow_wraps_to_bottom_mode0(self, mock_curs, mock_colors, mock_has_colors):
+        """Mode 0: Pressing UP from mode switcher jumps to bottom-most element (Convert button)."""
+        state = CommanderState()
+        state.active_tab = 0
+        state.active_panel = ActivePanel.LEFT
+        state.left_focus_idx = 0
+
+        # 1. UP -> enters mode switcher
+        # 2. UP -> wraps to bottom-most functionality (Convert button in RIGHT panel)
+        # 3. 'q' -> quit
+        self.mock_win.getch.side_effect = [
+            curses.KEY_UP,
+            curses.KEY_UP,
+            ord("q"),
+        ]
+        run_commander_tui(self.mock_win, initial_state=state)
+
+        self.assertFalse(state.mode_switcher_focused)
+        self.assertEqual(state.active_panel, ActivePanel.RIGHT)
+        expected_btn_idx = 10 + len(state.get_mapping_fields_for_format())
+        self.assertEqual(state.right_focus_idx, expected_btn_idx)
+
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_mode_switcher_up_arrow_wraps_to_bottom_mode1(self, mock_curs, mock_colors, mock_has_colors):
+        """Mode 1: Pressing UP from mode switcher jumps to bottom-most element (Queue panel)."""
+        state = CommanderState()
+        state.active_tab = 1
+        state.lora_active_panel = "left"
+        state.lora_left_focus_idx = 0
+
+        # 1. UP -> enters mode switcher
+        # 2. UP -> wraps to bottom-most functionality (Queue panel)
+        # 3. 'q' -> quit
+        self.mock_win.getch.side_effect = [
+            curses.KEY_UP,
+            curses.KEY_UP,
+            ord("q"),
+        ]
+        run_commander_tui(self.mock_win, initial_state=state)
+
+        self.assertFalse(state.mode_switcher_focused)
+        self.assertEqual(state.lora_active_panel, "queue")
+        self.assertEqual(state.selected_queue_idx, 0)
+
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_mode_switcher_up_arrow_wraps_to_bottom_mode1_with_runs(self, mock_curs, mock_colors, mock_has_colors):
+        """Mode 1: Pressing UP from mode switcher jumps to last run in queue when runs exist."""
+        from mlx_commander.lora.queue_manager import QueueManager, QueuedRun
+        state = CommanderState()
+        state.active_tab = 1
+        state.lora_active_panel = "left"
+        state.lora_left_focus_idx = 0
+        state.queue_manager = QueueManager(Path("/tmp/mock_queue_test"))
+        state.queue_manager.runs = [
+            QueuedRun(id="r1", name="Run 1", model="m", data="d"),
+            QueuedRun(id="r2", name="Run 2", model="m", data="d"),
+            QueuedRun(id="r3", name="Run 3", model="m", data="d"),
+        ]
+
+        # 1. UP -> enters mode switcher
+        # 2. UP -> wraps to bottom-most functionality (last item in Queue panel: index 2)
+        # 3. 'q' -> quit
+        self.mock_win.getch.side_effect = [
+            curses.KEY_UP,
+            curses.KEY_UP,
+            ord("q"),
+        ]
+        run_commander_tui(self.mock_win, initial_state=state)
+
+        self.assertFalse(state.mode_switcher_focused)
+        self.assertEqual(state.lora_active_panel, "queue")
+        self.assertEqual(state.selected_queue_idx, 2)
+
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_mode_switcher_up_arrow_wraps_to_bottom_mode2(self, mock_curs, mock_colors, mock_has_colors):
+        """Mode 2: Pressing UP (or 'k') from mode switcher jumps to bottom-most element (Sweep panel)."""
+        state = CommanderState()
+        state.active_tab = 2
+        state.multi_active_panel = "left"
+        state.multi_left_focus_idx = 0
+
+        # 1. UP -> enters mode switcher
+        # 2. ord('k') -> wraps to bottom-most functionality (Sweep panel)
+        # 3. 'q' -> quit
+        self.mock_win.getch.side_effect = [
+            curses.KEY_UP,
+            ord("k"),
+            ord("q"),
+        ]
+        run_commander_tui(self.mock_win, initial_state=state)
+
+        self.assertFalse(state.mode_switcher_focused)
+        self.assertEqual(state.multi_active_panel, "sweep")
+
 
 if __name__ == "__main__":
     unittest.main()

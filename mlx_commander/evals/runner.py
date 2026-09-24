@@ -30,6 +30,7 @@ from .metrics import (
     compute_exact_match,
     compute_substring_match,
     compute_word_metrics,
+    format_cli_eval_summary_matrices,
     normalize_answer,
 )
 from .storage import (
@@ -561,6 +562,12 @@ def run_generative_eval(
         "confusion_matrix": confusion_matrix,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
+
+    # Display the model confusion map matrix in the CLI
+    cli_matrices_text = format_cli_eval_summary_matrices(summary)
+    if cli_matrices_text:
+        print("\n" + cli_matrices_text + "\n")
+        sys.stdout.flush()
 
     # 5. Persist 3-Tier Storage Artifacts
     run_adapter_dir = Path(config.adapter_path)

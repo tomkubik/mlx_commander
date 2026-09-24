@@ -519,6 +519,89 @@ class TestLoraUI(unittest.TestCase):
         self.assertEqual(state.lora_left_focus_idx, 0, "DOWN from bottom of queue pane must wrap to top row (0) of selector pane")
 
 
+    @patch("mlx_commander.tui.app.spawn_lora_queue_terminal", return_value=True)
+    @patch("mlx_commander.tui.app.show_message_dialog")
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=False)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_f5_runs_immediately_without_f6(self, mock_curs, mock_colors, mock_has_colors, mock_dialog, mock_spawn):
+        """Verify that pressing F5 in Mode 2 immediately runs current config without needing F6 first."""
+        state = CommanderState()
+        state.active_tab = 1
+        state.queue_manager = QueueManager(self.queue_dir)
+        state.lora_config.model = "mlx-community/Llama-3.2-3B-Instruct-4bit"
+        state.lora_config.data = str(self.dataset_dir)
+        self.assertEqual(len(state.queue_manager.runs), 0)
+
+        # Press F5 to run directly, then 'q' to quit
+        self.mock_win.getch.side_effect = [
+            curses.KEY_F5,
+            ord("q"),
+        ]
+        run_commander_tui(self.mock_win, initial_state=state)
+
+        # The current config should have been auto-added to queue and spawned
+        self.assertEqual(len(state.queue_manager.runs), 1)
+        self.assertEqual(state.queue_manager.runs[0].model, "mlx-community/Llama-3.2-3B-Instruct-4bit")
+        mock_spawn.assert_called_once()
+
+    @patch("mlx_commander.tui.app.spawn_lora_queue_terminal", return_value=True)
+    @patch("mlx_commander.tui.app.show_message_dialog")
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=False)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_f6_schedule_then_f5_run_preserved(self, mock_curs, mock_colors, mock_has_colors, mock_dialog, mock_spawn):
+        """Verify that scheduling with F6 and running later with F5 is fully preserved without duplicating runs."""
+        state = CommanderState()
+        state.active_tab = 1
+        state.queue_manager = QueueManager(self.queue_dir)
+        state.lora_config.model = "mlx-community/Llama-3.2-3B-Instruct-4bit"
+        state.lora_config.data = str(self.dataset_dir)
+
+        # Press F6 to schedule, then F5 to execute scheduled queue, then 'q'
+        self.mock_win.getch.side_effect = [
+            curses.KEY_F6,
+            curses.KEY_F5,
+            ord("q"),
+        ]
+        run_commander_tui(self.mock_win, initial_state=state)
+
+        # Should contain exactly 1 run (not duplicated)
+        self.assertEqual(len(state.queue_manager.runs), 1)
+        mock_spawn.assert_called_once()
+
+    @patch("mlx_commander.tui.app.spawn_lora_queue_terminal", return_value=True)
+    @patch("mlx_commander.tui.app.show_message_dialog")
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=False)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_f5_runs_current_config_when_previous_runs_completed(self, mock_curs, mock_colors, mock_has_colors, mock_dialog, mock_spawn):
+        """Verify that if all existing runs in queue are completed, F5 enqueues and runs the current config."""
+        state = CommanderState()
+        state.active_tab = 1
+        state.queue_manager = QueueManager(self.queue_dir)
+        completed_run = LoraRunConfig(id="prev_run", name="Previous Completed Run", status="completed")
+        state.queue_manager.add_run(completed_run)
+        self.assertEqual(len(state.queue_manager.get_pending_runs()), 0)
+
+        state.lora_config.model = "mlx-community/Llama-3.2-3B-Instruct-4bit"
+        state.lora_config.data = str(self.dataset_dir)
+
+        # Press F5, then 'q'
+        self.mock_win.getch.side_effect = [
+            curses.KEY_F5,
+            ord("q"),
+        ]
+        run_commander_tui(self.mock_win, initial_state=state)
+
+        # Total runs should now be 2 (1 completed + 1 new pending run), and terminal spawned
+        self.assertEqual(len(state.queue_manager.runs), 2)
+        pending = state.queue_manager.get_pending_runs()
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0].model, "mlx-community/Llama-3.2-3B-Instruct-4bit")
+        mock_spawn.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
 
