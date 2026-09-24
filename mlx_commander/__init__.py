@@ -1,6 +1,6 @@
 """
-mlx_commander - Hugging Face to MLX Dataset Converter
-Convert Hugging Face datasets into Apple MLX fine-tuning formats with interactive TUI and CLI.
+mlx_commander - MLX Training Ops & Dataset Converter
+Configure and run model training on Apple MLX via interactive TUI and CLI.
 """
 
 import os
@@ -15,4 +15,4 @@ warnings.filterwarnings("ignore", module="transformers.audio_utils")
 # exit/cancellation on ESC across all curses pickers and dialogs.
 os.environ.setdefault("ESCDELAY", "25")
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"

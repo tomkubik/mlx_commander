@@ -105,7 +105,7 @@ def parse_prefill_state(val: str) -> dict:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mlx_commander",
-        description="Convert Hugging Face datasets into Apple MLX (mlx-lm) format with TUI or CLI.",
+        description="Configure and run model training on Apple MLX via interactive TUI and CLI.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
