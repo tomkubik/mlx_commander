@@ -891,34 +891,55 @@ def show_text_edit_dialog(
     default_val: str = "",
     is_number: bool = False,
 ) -> Optional[str]:
-    """Modal dialog overlay to edit a single value in-place."""
+    """Modal dialog overlay to edit a single value in-place with horizontal scrolling."""
     configure_escdelay(25)
     max_y, max_x = stdscr.getmaxyx()
     h = 7
-    w = min(max_x - 8, 60)
+    w = min(max_x - 4, max(50, min(max_x - 8, 86)))
     start_y = max(1, (max_y - h) // 2)
     start_x = max(1, (max_x - w) // 2)
 
     safe_curs_set(1)
     text_chars = list(default_val)
     cursor_pos = len(text_chars)
+    box_w = max(10, w - 6)
+    scroll_offset = max(0, cursor_pos - box_w + 1) if len(text_chars) >= box_w else 0
 
     while True:
+        cursor_pos = max(0, min(len(text_chars), cursor_pos))
+        if len(text_chars) < box_w:
+            scroll_offset = 0
+        else:
+            if cursor_pos < scroll_offset:
+                scroll_offset = cursor_pos
+            elif cursor_pos >= scroll_offset + box_w:
+                scroll_offset = cursor_pos - box_w + 1
+            scroll_offset = max(0, min(scroll_offset, len(text_chars) - box_w + 1))
+            scroll_offset = max(0, min(scroll_offset, cursor_pos))
+
         safe_addstr(stdscr, start_y, start_x, "╔" + "═" * (w - 2) + "╗", get_color(2) | curses.A_BOLD)
         safe_addstr(stdscr, start_y, start_x + 2, f" {title} ", (get_color(4) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
         for r in range(1, h - 1):
             safe_addstr(stdscr, start_y + r, start_x, "║" + " " * (w - 2) + "║", get_color(2))
         safe_addstr(stdscr, start_y + h - 1, start_x, "╚" + "═" * (w - 2) + "╝", get_color(2) | curses.A_BOLD)
 
-        safe_addstr(stdscr, start_y + 1, start_x + 2, prompt, (get_color(4) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
+        safe_addstr(stdscr, start_y + 1, start_x + 2, prompt[: w - 4], (get_color(4) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
 
-        val_str = "".join(text_chars)
-        box_w = w - 6
-        disp = val_str[-(box_w):] if len(val_str) > box_w else val_str
-        safe_addstr(stdscr, start_y + 3, start_x + 3, disp + " " * (box_w - len(disp)), (get_color(2) | curses.A_STANDOUT) if safe_has_colors() else curses.A_STANDOUT)
-        safe_addstr(stdscr, start_y + 5, start_x + 2, "[Enter] OK   [Esc] Cancel", (get_color(4) | curses.A_DIM) if safe_has_colors() else curses.A_DIM)
+        disp_slice = text_chars[scroll_offset : scroll_offset + box_w]
+        disp = "".join(disp_slice)
+        pad = " " * (box_w - len(disp))
+        safe_addstr(stdscr, start_y + 3, start_x + 3, disp + pad, (get_color(2) | curses.A_STANDOUT) if safe_has_colors() else curses.A_STANDOUT)
 
-        cursor_x = start_x + 3 + min(cursor_pos, box_w)
+        left_ind = "«" if scroll_offset > 0 else " "
+        right_ind = "»" if (scroll_offset + box_w < len(text_chars)) else " "
+        safe_addstr(stdscr, start_y + 3, start_x + 2, left_ind, (get_color(4) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
+        safe_addstr(stdscr, start_y + 3, start_x + 3 + box_w, right_ind, (get_color(4) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
+
+        hint = "[Enter] OK   [Esc] Cancel   [←/→] Scroll   [Home/End]"
+        safe_addstr(stdscr, start_y + 5, start_x + 2, hint[: w - 4], (get_color(4) | curses.A_DIM) if safe_has_colors() else curses.A_DIM)
+
+        cursor_col = cursor_pos - scroll_offset
+        cursor_x = start_x + 3 + cursor_col
         stdscr.move(start_y + 3, cursor_x)
         stdscr.refresh()
 
@@ -933,13 +954,25 @@ def show_text_edit_dialog(
             if cursor_pos > 0:
                 text_chars.pop(cursor_pos - 1)
                 cursor_pos -= 1
-        elif k == curses.KEY_DC:
+        elif k in (curses.KEY_DC, 4):  # Delete or Ctrl+D
             if cursor_pos < len(text_chars):
                 text_chars.pop(cursor_pos)
         elif k == curses.KEY_LEFT:
             cursor_pos = max(0, cursor_pos - 1)
         elif k == curses.KEY_RIGHT:
             cursor_pos = min(len(text_chars), cursor_pos + 1)
+        elif k in (curses.KEY_HOME, 1):  # Home or Ctrl+A
+            cursor_pos = 0
+            scroll_offset = 0
+        elif k in (curses.KEY_END, 5):  # End or Ctrl+E
+            cursor_pos = len(text_chars)
+            scroll_offset = max(0, cursor_pos - box_w + 1)
+        elif k == 21:  # Ctrl+U
+            text_chars = text_chars[cursor_pos:]
+            cursor_pos = 0
+            scroll_offset = 0
+        elif k == 11:  # Ctrl+K
+            text_chars = text_chars[:cursor_pos]
         elif 32 <= k <= 126:
             char = chr(k)
             if is_number and char not in "0123456789.":
@@ -955,11 +988,11 @@ def show_multi_value_edit_dialog(
     current_values: List[Any],
     val_type: type = int,
 ) -> Optional[List[Any]]:
-    """Modal dialog overlay to edit multi-condition values as comma-separated entries."""
+    """Modal dialog overlay to edit multi-condition values as comma-separated entries with horizontal scrolling."""
     configure_escdelay(25)
     max_y, max_x = stdscr.getmaxyx()
     h = 8
-    w = min(max_x - 8, 68)
+    w = min(max_x - 4, max(50, min(max_x - 8, 86)))
     start_y = max(1, (max_y - h) // 2)
     start_x = max(1, (max_x - w) // 2)
 
@@ -976,29 +1009,50 @@ def show_multi_value_edit_dialog(
 
     text_chars = list(default_str)
     cursor_pos = len(text_chars)
+    box_w = max(10, w - 6)
+    scroll_offset = max(0, cursor_pos - box_w + 1) if len(text_chars) >= box_w else 0
     err_msg = ""
 
     while True:
+        cursor_pos = max(0, min(len(text_chars), cursor_pos))
+        if len(text_chars) < box_w:
+            scroll_offset = 0
+        else:
+            if cursor_pos < scroll_offset:
+                scroll_offset = cursor_pos
+            elif cursor_pos >= scroll_offset + box_w:
+                scroll_offset = cursor_pos - box_w + 1
+            scroll_offset = max(0, min(scroll_offset, len(text_chars) - box_w + 1))
+            scroll_offset = max(0, min(scroll_offset, cursor_pos))
+
         safe_addstr(stdscr, start_y, start_x, "╔" + "═" * (w - 2) + "╗", get_color(2) | curses.A_BOLD)
         safe_addstr(stdscr, start_y, start_x + 2, f" {title} ", (get_color(4) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
         for r in range(1, h - 1):
             safe_addstr(stdscr, start_y + r, start_x, "║" + " " * (w - 2) + "║", get_color(2))
         safe_addstr(stdscr, start_y + h - 1, start_x, "╚" + "═" * (w - 2) + "╝", get_color(2) | curses.A_BOLD)
 
-        safe_addstr(stdscr, start_y + 1, start_x + 2, prompt, (get_color(4) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
+        safe_addstr(stdscr, start_y + 1, start_x + 2, prompt[: w - 4], (get_color(4) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
         if err_msg:
             safe_addstr(stdscr, start_y + 2, start_x + 2, err_msg[:w - 4], (get_color(COLOR_ERROR) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
         else:
             hint = "Comma-separated list (e.g. 2, 4, 8) — each forms a sweep run"
             safe_addstr(stdscr, start_y + 2, start_x + 2, hint[:w - 4], (get_color(COLOR_LABEL_GRAY) | curses.A_DIM) if safe_has_colors() else curses.A_DIM)
 
-        val_str = "".join(text_chars)
-        box_w = w - 6
-        disp = val_str[-(box_w):] if len(val_str) > box_w else val_str
-        safe_addstr(stdscr, start_y + 4, start_x + 3, disp + " " * (box_w - len(disp)), (get_color(2) | curses.A_STANDOUT) if safe_has_colors() else curses.A_STANDOUT)
-        safe_addstr(stdscr, start_y + 6, start_x + 2, "[Enter] OK   [Esc] Cancel", (get_color(4) | curses.A_DIM) if safe_has_colors() else curses.A_DIM)
+        disp_slice = text_chars[scroll_offset : scroll_offset + box_w]
+        disp = "".join(disp_slice)
+        pad = " " * (box_w - len(disp))
+        safe_addstr(stdscr, start_y + 4, start_x + 3, disp + pad, (get_color(2) | curses.A_STANDOUT) if safe_has_colors() else curses.A_STANDOUT)
 
-        cursor_x = start_x + 3 + min(cursor_pos, box_w)
+        left_ind = "«" if scroll_offset > 0 else " "
+        right_ind = "»" if (scroll_offset + box_w < len(text_chars)) else " "
+        safe_addstr(stdscr, start_y + 4, start_x + 2, left_ind, (get_color(4) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
+        safe_addstr(stdscr, start_y + 4, start_x + 3 + box_w, right_ind, (get_color(4) | curses.A_BOLD) if safe_has_colors() else curses.A_BOLD)
+
+        footer_hint = "[Enter] OK   [Esc] Cancel   [←/→] Scroll   [Home/End]"
+        safe_addstr(stdscr, start_y + 6, start_x + 2, footer_hint[: w - 4], (get_color(4) | curses.A_DIM) if safe_has_colors() else curses.A_DIM)
+
+        cursor_col = cursor_pos - scroll_offset
+        cursor_x = start_x + 3 + cursor_col
         stdscr.move(start_y + 4, cursor_x)
         stdscr.refresh()
 
@@ -1048,7 +1102,7 @@ def show_multi_value_edit_dialog(
                 text_chars.pop(cursor_pos - 1)
                 cursor_pos -= 1
                 err_msg = ""
-        elif k == curses.KEY_DC:
+        elif k in (curses.KEY_DC, 4):  # Delete or Ctrl+D
             if cursor_pos < len(text_chars):
                 text_chars.pop(cursor_pos)
                 err_msg = ""
@@ -1056,6 +1110,20 @@ def show_multi_value_edit_dialog(
             cursor_pos = max(0, cursor_pos - 1)
         elif k == curses.KEY_RIGHT:
             cursor_pos = min(len(text_chars), cursor_pos + 1)
+        elif k in (curses.KEY_HOME, 1):  # Home or Ctrl+A
+            cursor_pos = 0
+            scroll_offset = 0
+        elif k in (curses.KEY_END, 5):  # End or Ctrl+E
+            cursor_pos = len(text_chars)
+            scroll_offset = max(0, cursor_pos - box_w + 1)
+        elif k == 21:  # Ctrl+U
+            text_chars = text_chars[cursor_pos:]
+            cursor_pos = 0
+            scroll_offset = 0
+            err_msg = ""
+        elif k == 11:  # Ctrl+K
+            text_chars = text_chars[:cursor_pos]
+            err_msg = ""
         elif 32 <= k <= 126:
             char = chr(k)
             text_chars.insert(cursor_pos, char)
@@ -2247,8 +2315,9 @@ def show_choice_dialog(
         sel_idx = choices.index(current_val)
 
     max_y, max_x = stdscr.getmaxyx()
-    h = min(len(choices) + 6, max_y - 4, 14)
-    w = min(max_x - 4, 54)
+    h = min(len(choices) + 6, max_y - 4, 18)
+    longest_choice = max((len(c) for c in choices), default=30)
+    w = min(max_x - 4, max(56, longest_choice + 12))
     start_y = max(1, (max_y - h) // 2)
     start_x = max(1, (max_x - w) // 2)
 

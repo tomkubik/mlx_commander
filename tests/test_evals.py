@@ -18,12 +18,16 @@ from mlx_commander.evals.metrics import (
     normalize_answer,
 )
 from mlx_commander.evals.runner import (
+    active_checkpoint_context,
     clean_generation_answer,
+    discover_adapter_checkpoints,
     estimate_eval_throughput,
     extract_generation_text,
     format_prompt_for_model,
     load_test_dataset,
     parse_chat_prompt,
+    parse_training_losses_from_log,
+    resolve_eval_checkpoints,
     run_generative_eval,
     run_inference_batch,
 )
@@ -32,7 +36,13 @@ from mlx_commander.evals.storage import (
     generate_html_dashboard,
     save_run_predictions,
 )
-from mlx_commander.lora.config import LoraRunConfig
+from mlx_commander.lora.config import (
+    EVAL_STRATEGY_ALL,
+    EVAL_STRATEGY_FINAL,
+    EVAL_STRATEGY_MIN_TRAIN_LOSS,
+    EVAL_STRATEGY_MIN_VAL_LOSS,
+    LoraRunConfig,
+)
 from mlx_commander.lora.multi_config import MultiLoraRunConfig, SWEEP_FIELD_DEFS
 from mlx_commander.lora.tracking import WandbTracker
 from mlx_commander.tui.state import CommanderState
@@ -541,6 +551,184 @@ class TestChatTemplateFormatting(unittest.TestCase):
         self.assertEqual(clean_generation_answer("<start_of_turn>model\nnegative<end_of_turn>"), "negative")
         self.assertEqual(clean_generation_answer("assistant:\npositive<|eot_id|>"), "positive")
         self.assertEqual(clean_generation_answer("neutral</s>"), "neutral")
+
+
+class TestAdapterCheckpointEvaluation(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.base_path = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_parse_training_losses_from_log(self):
+        log_file = self.base_path / "run.log"
+        with open(log_file, "w", encoding="utf-8") as f:
+            f.write("=== MLX Commander LoRA Run ===\n")
+            f.write("Iter 100: Train loss 2.500, Learning Rate 1e-4\n")
+            f.write("Iter 100: Val loss 2.800, Val It/sec 2.0\n")
+            f.write("Iter 200: Train loss 1.900, Learning Rate 1e-4\n")
+            f.write("★ [Validation Loss Milestone] Iter 200: Val loss = 1.600 (val took 0.4s)\n")
+            f.write("Iter 300: Train loss 1.400, Learning Rate 1e-4\n")
+            f.write("Iter 300: Val loss 1.750, Val It/sec 2.0\n")
+
+        train_losses, val_losses = parse_training_losses_from_log(log_file)
+        self.assertEqual(train_losses[100], 2.5)
+        self.assertEqual(train_losses[200], 1.9)
+        self.assertEqual(train_losses[300], 1.4)
+        self.assertEqual(val_losses[100], 2.8)
+        self.assertEqual(val_losses[200], 1.6)
+        self.assertEqual(val_losses[300], 1.75)
+
+    def test_discover_adapter_checkpoints(self):
+        adir = self.base_path / "adapters_test"
+        adir.mkdir()
+        ckpt100 = adir / "0000100_adapters.safetensors"
+        ckpt200 = adir / "0000200_adapters.safetensors"
+        ckpt_final = adir / "adapters.safetensors"
+        ckpt100.touch()
+        ckpt200.touch()
+        ckpt_final.touch()
+
+        cfg = LoraRunConfig(name="test_run", adapter_path=str(adir), iters=300)
+        ckpts = discover_adapter_checkpoints(adir, config=cfg)
+        self.assertIn(100, ckpts)
+        self.assertIn(200, ckpts)
+        self.assertIn(300, ckpts)
+        self.assertEqual(ckpts[100], ckpt100)
+        self.assertEqual(ckpts[200], ckpt200)
+        self.assertEqual(ckpts[300], ckpt_final)
+
+    def test_resolve_eval_checkpoints_strategies(self):
+        adir = self.base_path / "adapters_strat"
+        adir.mkdir()
+        (adir / "0000100_adapters.safetensors").touch()
+        (adir / "0000200_adapters.safetensors").touch()
+        (adir / "0000300_adapters.safetensors").touch()
+        (adir / "adapters.safetensors").touch()
+
+        log_file = self.base_path / "run.log"
+        with open(log_file, "w", encoding="utf-8") as f:
+            f.write("Iter 100: Train loss 2.500\nIter 100: Val loss 2.800\n")
+            f.write("Iter 200: Train loss 1.900\nIter 200: Val loss 1.350\n")  # Min val loss!
+            f.write("Iter 300: Train loss 1.100\nIter 300: Val loss 1.750\n")  # Min train loss!
+
+        cfg = LoraRunConfig(
+            name="strat_run",
+            adapter_path=str(adir),
+            iters=300,
+            log_file=str(log_file),
+        )
+
+        # 1. Final adapter
+        cfg.eval_adapter_strategy = EVAL_STRATEGY_FINAL
+        res_final = resolve_eval_checkpoints(cfg, log_file=log_file)
+        self.assertEqual(len(res_final), 1)
+        self.assertIn("Final", res_final[0][0])
+        self.assertTrue(res_final[0][1].name in ("adapters.safetensors", "0000300_adapters.safetensors"))
+
+        # 2. Min val loss
+        cfg.eval_adapter_strategy = EVAL_STRATEGY_MIN_VAL_LOSS
+        res_val = resolve_eval_checkpoints(cfg, log_file=log_file)
+        self.assertEqual(len(res_val), 1)
+        self.assertIn("minimal validation loss", res_val[0][0].lower())
+        self.assertIn("200", res_val[0][1].name)
+
+        # 3. Min train loss
+        cfg.eval_adapter_strategy = EVAL_STRATEGY_MIN_TRAIN_LOSS
+        res_train = resolve_eval_checkpoints(cfg, log_file=log_file)
+        self.assertEqual(len(res_train), 1)
+        self.assertIn("minimal training loss", res_train[0][0].lower())
+        self.assertTrue(res_train[0][1].name in ("adapters.safetensors", "0000300_adapters.safetensors"))
+
+        # 4. All adapters
+        cfg.eval_adapter_strategy = EVAL_STRATEGY_ALL
+        res_all = resolve_eval_checkpoints(cfg, log_file=log_file)
+        self.assertEqual(len(res_all), 3)
+        self.assertIn("100", res_all[0][1].name)
+        self.assertIn("200", res_all[1][1].name)
+        self.assertTrue(res_all[2][1].name in ("adapters.safetensors", "0000300_adapters.safetensors"))
+
+    def test_resolve_eval_checkpoints_fallback_when_no_val_loss(self):
+        adir = self.base_path / "adapters_fallback"
+        adir.mkdir()
+        (adir / "0000100_adapters.safetensors").touch()
+        (adir / "adapters.safetensors").touch()
+
+        # Empty log (no validation entries)
+        log_file = self.base_path / "empty.log"
+        log_file.touch()
+
+        cfg = LoraRunConfig(
+            name="fallback_run",
+            adapter_path=str(adir),
+            iters=100,
+            eval_adapter_strategy=EVAL_STRATEGY_MIN_VAL_LOSS,
+            log_file=str(log_file),
+        )
+        res = resolve_eval_checkpoints(cfg, log_file=log_file)
+        self.assertEqual(len(res), 1)
+        self.assertIn("fallback", res[0][0].lower())
+
+    def test_run_generative_eval_all_checkpoints_execution(self):
+        ds_dir = self.base_path / "ds"
+        ds_dir.mkdir()
+        test_file = ds_dir / "test.jsonl"
+        with open(test_file, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"prompt": "What is Apple?", "completion": "Tech company"}) + "\n")
+            f.write(json.dumps({"prompt": "What is Python?", "completion": "Language"}) + "\n")
+
+        adir = self.base_path / "adapters_multi_eval"
+        adir.mkdir()
+        (adir / "0000100_adapters.safetensors").touch()
+        (adir / "0000200_adapters.safetensors").touch()
+        (adir / "adapters.safetensors").touch()
+
+        cfg = LoraRunConfig(
+            name="multi_eval_run",
+            data=str(ds_dir),
+            adapter_path=str(adir),
+            iters=200,
+            run_eval=True,
+            eval_adapter_strategy=EVAL_STRATEGY_ALL,
+        )
+
+        res = run_generative_eval(
+            config=cfg,
+            data_path=ds_dir,
+            mock_predictions=["Tech company", "Language"],
+            mock_baseline=["Wrong", "Language"],
+        )
+        self.assertIsNotNone(res)
+        self.assertIn("all_eval_results", res)
+        # Evaluated both step 100 and step 200
+        self.assertEqual(len(res["all_eval_results"]), 2)
+        # Check leaderboard CSV exists and has entries
+        leaderboard_csv = self.base_path / "eval_leaderboard.csv"
+        self.assertTrue(leaderboard_csv.exists())
+        with open(leaderboard_csv, "r", encoding="utf-8") as f:
+            csv_content = f.read()
+        self.assertIn("multi_eval_run", csv_content)
+        self.assertIn("100", csv_content)
+        self.assertIn("200", csv_content)
+
+    def test_lora_run_config_eval_strategy_serialization(self):
+        cfg = LoraRunConfig(
+            name="serial_run",
+            eval_adapter_strategy=EVAL_STRATEGY_MIN_VAL_LOSS,
+            run_eval=True,
+        )
+        d = cfg.to_dict()
+        self.assertEqual(d["eval_adapter_strategy"], "best_val_loss")
+
+        loaded = LoraRunConfig.from_dict(d)
+        self.assertEqual(loaded.eval_adapter_strategy, "best_val_loss")
+
+        # YAML parsing
+        yaml_text = "eval_adapter_strategy: best_train_loss\nrun_eval: true\n"
+        from_yaml_cfg = LoraRunConfig.from_yaml(yaml_text)
+        self.assertEqual(from_yaml_cfg.eval_adapter_strategy, "best_train_loss")
+        self.assertTrue(from_yaml_cfg.run_eval)
 
 
 if __name__ == "__main__":

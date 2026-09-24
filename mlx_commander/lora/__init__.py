@@ -3,6 +3,13 @@ MLX Commander LoRA Fine-Tuning & Queue Orchestration Module.
 """
 
 from .config import (
+    EVAL_STRATEGY_ALL,
+    EVAL_STRATEGY_CHOICES,
+    EVAL_STRATEGY_DISABLED,
+    EVAL_STRATEGY_DISPLAY_MAP,
+    EVAL_STRATEGY_FINAL,
+    EVAL_STRATEGY_MIN_TRAIN_LOSS,
+    EVAL_STRATEGY_MIN_VAL_LOSS,
     FINE_TUNE_TYPES,
     OPTIMIZERS,
     POPULAR_MLX_MODELS,
@@ -47,6 +54,13 @@ from .vlm_safeguards import (
 )
 
 __all__ = [
+    "EVAL_STRATEGY_FINAL",
+    "EVAL_STRATEGY_MIN_VAL_LOSS",
+    "EVAL_STRATEGY_MIN_TRAIN_LOSS",
+    "EVAL_STRATEGY_ALL",
+    "EVAL_STRATEGY_DISABLED",
+    "EVAL_STRATEGY_CHOICES",
+    "EVAL_STRATEGY_DISPLAY_MAP",
     "LoraRunConfig",
     "MultiLoraRunConfig",
     "SWEEP_FIELD_DEFS",

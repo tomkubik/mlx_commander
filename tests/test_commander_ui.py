@@ -132,6 +132,47 @@ class TestCommanderUI(unittest.TestCase):
         val = show_text_edit_dialog(self.mock_win, "Edit", "Prompt", default_val="original")
         self.assertIsNone(val)
 
+    def test_show_text_edit_dialog_left_arrow_scrolls_and_cursor_moves(self):
+        """Verify pressing Left Arrow on long path moves cursor and scrolls viewport to expose beginning."""
+        long_path = "adapters/01_lora_r16_a32_lr1e-5_b4_i1000_Llama-3.2-3B-Instruct-4bit"
+        # Start at end, press Left Arrow 10 times, then Enter
+        self.mock_win.reset_mock()
+        self.mock_win.getmaxyx.return_value = (24, 80)
+        self.mock_win.getch.side_effect = [curses.KEY_LEFT] * 10 + [10]
+        val = show_text_edit_dialog(self.mock_win, "Adapter Path", "Directory to store weights:", default_val=long_path)
+        self.assertEqual(val, long_path)
+        # Verify stdscr.move was called with changing coordinates as cursor moved left
+        move_calls = [c[0] for c in self.mock_win.move.call_args_list]
+        self.assertGreater(len(move_calls), 1)
+        # Cursor X should have decreased
+        initial_x = move_calls[0][1]
+        final_x = move_calls[10][1]
+        self.assertLess(final_x, initial_x, "Cursor X must move to the left when pressing Left Arrow")
+
+    def test_show_text_edit_dialog_home_key_exposes_beginning(self):
+        """Verify Home key jumps to index 0, scrolls viewport to offset 0, and allows prepending text."""
+        long_path = "adapters/01_lora_r16_a32_lr1e-5_b4_i1000_Llama-3.2-3B-Instruct-4bit"
+        # Home key -> type 'my_' -> Enter
+        self.mock_win.reset_mock()
+        self.mock_win.getmaxyx.return_value = (24, 80)
+        self.mock_win.getch.side_effect = [
+            curses.KEY_HOME,
+            ord("m"),
+            ord("y"),
+            ord("_"),
+            10,
+        ]
+        val = show_text_edit_dialog(self.mock_win, "Adapter Path", "Directory to store weights:", default_val=long_path)
+        self.assertEqual(val, f"my_{long_path}")
+        # Verify that after Home key, cursor moved to the left-most position of the input box
+        move_calls = [c[0] for c in self.mock_win.move.call_args_list]
+        home_x = move_calls[1][1]
+        # At index 0, cursor_col is 0, so cursor_x is start_x + 3
+        w = min(80 - 4, max(50, min(80 - 8, 86)))
+        start_x = max(1, (80 - w) // 2)
+        expected_home_x = start_x + 3
+        self.assertEqual(home_x, expected_home_x, "Home key must place cursor at the very left edge of the input box")
+
     def test_show_help_dialog_esc(self):
         # Press ESC (27) to dismiss help
         self.mock_win.getch.side_effect = [27]
@@ -1349,16 +1390,17 @@ class TestCommanderUI(unittest.TestCase):
     @patch("mlx_commander.tui.app.curses.curs_set")
     def test_mode_switcher_up_arrow_wraps_to_bottom_mode1_with_runs(self, mock_curs, mock_colors, mock_has_colors):
         """Mode 1: Pressing UP from mode switcher jumps to last run in queue when runs exist."""
-        from mlx_commander.lora.queue_manager import QueueManager, QueuedRun
+        from mlx_commander.lora.queue import QueueManager
+        from mlx_commander.lora.config import LoraRunConfig
         state = CommanderState()
         state.active_tab = 1
         state.lora_active_panel = "left"
         state.lora_left_focus_idx = 0
         state.queue_manager = QueueManager(Path("/tmp/mock_queue_test"))
         state.queue_manager.runs = [
-            QueuedRun(id="r1", name="Run 1", model="m", data="d"),
-            QueuedRun(id="r2", name="Run 2", model="m", data="d"),
-            QueuedRun(id="r3", name="Run 3", model="m", data="d"),
+            LoraRunConfig(id="r1", name="Run 1", model="m", data="d"),
+            LoraRunConfig(id="r2", name="Run 2", model="m", data="d"),
+            LoraRunConfig(id="r3", name="Run 3", model="m", data="d"),
         ]
 
         # 1. UP -> enters mode switcher

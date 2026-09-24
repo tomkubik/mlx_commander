@@ -24,6 +24,27 @@ POPULAR_MLX_MODELS = [
 FINE_TUNE_TYPES = ["lora", "dora", "full"]
 OPTIMIZERS = ["adamw", "adam", "muon", "sgd", "adafactor"]
 
+EVAL_STRATEGY_FINAL = "final"
+EVAL_STRATEGY_MIN_VAL_LOSS = "best_val_loss"
+EVAL_STRATEGY_MIN_TRAIN_LOSS = "best_train_loss"
+EVAL_STRATEGY_ALL = "all"
+EVAL_STRATEGY_DISABLED = "disabled"
+
+EVAL_STRATEGY_CHOICES = [
+    (EVAL_STRATEGY_FINAL, "Last adapter trained (final iteration checkpoint)"),
+    (EVAL_STRATEGY_MIN_VAL_LOSS, "Adapter with minimal validation loss"),
+    (EVAL_STRATEGY_MIN_TRAIN_LOSS, "Adapter with minimal training loss"),
+    (EVAL_STRATEGY_ALL, "Every single adapter"),
+    (EVAL_STRATEGY_DISABLED, "Disabled (do not run test evals)"),
+]
+
+EVAL_STRATEGY_DISPLAY_MAP = {
+    EVAL_STRATEGY_FINAL: "Last trained",
+    EVAL_STRATEGY_MIN_VAL_LOSS: "Min val loss",
+    EVAL_STRATEGY_MIN_TRAIN_LOSS: "Min train loss",
+    EVAL_STRATEGY_ALL: "All adapters",
+}
+
 
 def sanitize_model_slug(model_name: str) -> str:
     """
@@ -210,6 +231,7 @@ class LoraRunConfig:
     seed: int = 0
     resume_adapter_file: Optional[str] = None
     run_eval: bool = False
+    eval_adapter_strategy: str = EVAL_STRATEGY_FINAL
     engine: str = "mlx_lm"  # "mlx_lm" or "mlx_vlm"
     train_vision: bool = False
     train_on_completions: bool = True
@@ -328,7 +350,7 @@ class LoraRunConfig:
                         pass
                 elif k in ("train", "test", "grad_checkpoint", "mask_prompt", "run_eval", "train_vision", "train_on_completions"):
                     data[k] = v.lower() == "true"
-                elif k == "engine":
+                elif k in ("engine", "eval_adapter_strategy"):
                     data[k] = v
                 else:
                     data[k] = v

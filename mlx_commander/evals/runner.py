@@ -12,6 +12,8 @@ import os
 import re
 import sys
 import time
+from contextlib import contextmanager
+import tempfile
 import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -21,7 +23,14 @@ warnings.filterwarnings("ignore", message=".*mel filter has all zero values.*", 
 warnings.filterwarnings("ignore", message=".*num_mel_filters.*", category=UserWarning)
 warnings.filterwarnings("ignore", module="transformers.audio_utils")
 
-from ..lora.config import LoraRunConfig, sanitize_model_slug
+from ..lora.config import (
+    EVAL_STRATEGY_ALL,
+    EVAL_STRATEGY_FINAL,
+    EVAL_STRATEGY_MIN_TRAIN_LOSS,
+    EVAL_STRATEGY_MIN_VAL_LOSS,
+    LoraRunConfig,
+    sanitize_model_slug,
+)
 from ..lora.estimator import estimate_eval_throughput
 from .metrics import (
     build_confusion_matrix,
@@ -404,15 +413,232 @@ def get_or_create_baseline_cache(
     return preds
 
 
+def parse_training_losses_from_log(log_path: Optional[Union[str, Path]]) -> Tuple[Dict[int, float], Dict[int, float]]:
+    """
+    Parse iteration steps and their corresponding train loss and validation loss from a training log.
+    Returns:
+        (train_losses, val_losses) as Dict[step, loss]
+    """
+    train_losses: Dict[int, float] = {}
+    val_losses: Dict[int, float] = {}
+    if not log_path:
+        return train_losses, val_losses
+    p = Path(log_path)
+    if not p.is_file():
+        return train_losses, val_losses
+
+    try:
+        with open(p, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                iter_m = re.search(r'Iter\s+(\d+):', line)
+                if not iter_m:
+                    continue
+                step = int(iter_m.group(1))
+
+                val_m = re.search(r'Val loss\s*[=:]?\s*([0-9.]+)', line, re.IGNORECASE)
+                if val_m:
+                    try:
+                        val_losses[step] = float(val_m.group(1))
+                    except ValueError:
+                        pass
+
+                train_m = re.search(r'Train loss\s*[=:]?\s*([0-9.]+)', line, re.IGNORECASE)
+                if train_m:
+                    try:
+                        train_losses[step] = float(train_m.group(1))
+                    except ValueError:
+                        pass
+    except Exception:
+        pass
+
+    return train_losses, val_losses
+
+
+def discover_adapter_checkpoints(
+    adapter_dir: Union[str, Path],
+    config: Optional[LoraRunConfig] = None,
+) -> Dict[int, Path]:
+    """
+    Scan adapter_dir for saved MLX adapter checkpoint files.
+    Identifies step-stamped checkpoints (e.g. 0000100_adapters.safetensors,
+    0000100_adapters_lora_....safetensors) and final weights (adapters.safetensors).
+    Returns:
+        Dict mapping iteration step (int) to Path of the adapter checkpoint file.
+    """
+    adir = Path(adapter_dir)
+    checkpoints: Dict[int, Path] = {}
+    if not adir.exists():
+        return checkpoints
+
+    step_pattern = re.compile(r"^(\d+)_adapters.*\.safetensors$")
+    try:
+        items = sorted(list(adir.iterdir()))
+    except OSError:
+        return checkpoints
+
+    # 1. Step Checkpoints: e.g. 0000100_adapters.safetensors or 0000100_adapters_lora_....safetensors
+    for item in items:
+        if item.name == "adapters.safetensors":
+            continue
+        m = step_pattern.match(item.name)
+        if m:
+            step = int(m.group(1))
+            resolved = item.resolve() if item.is_symlink() else item
+            if step not in checkpoints or not item.is_symlink():
+                checkpoints[step] = resolved
+
+    # 2. Final adapter weights: adapters.safetensors
+    final_file = adir / "adapters.safetensors"
+    if final_file.exists():
+        resolved_final = final_file.resolve() if final_file.is_symlink() else final_file
+        m_final = step_pattern.match(resolved_final.name)
+        final_step = int(m_final.group(1)) if m_final else (config.iters if config else 1000)
+        if final_step not in checkpoints:
+            checkpoints[final_step] = resolved_final
+
+    # 3. Fallback: Any other .safetensors files
+    if not checkpoints:
+        for item in adir.glob("*.safetensors"):
+            checkpoints[config.iters if config else 1000] = item.resolve()
+
+    return checkpoints
+
+
+def resolve_eval_checkpoints(
+    config: LoraRunConfig,
+    strategy: Optional[str] = None,
+    log_file: Optional[Union[str, Path]] = None,
+) -> List[Tuple[str, Path]]:
+    """
+    Resolve which adapter checkpoint(s) should be evaluated based on the selected strategy:
+      - 'final': Last adapter trained (checkpoint at final step)
+      - 'best_val_loss': Adapter with minimal validation loss
+      - 'best_train_loss': Adapter with minimal training loss
+      - 'all': Every single adapter checkpoint
+    Returns:
+        List of (checkpoint_label, checkpoint_path) tuples.
+    """
+    strat = strategy or getattr(config, "eval_adapter_strategy", EVAL_STRATEGY_FINAL)
+    adir = Path(config.adapter_path)
+    checkpoints = discover_adapter_checkpoints(adir, config=config)
+
+    # If no checkpoint files could be discovered, fallback to canonical adapter path
+    if not checkpoints:
+        final_cand = adir / "adapters.safetensors"
+        return [("Final trained adapter", final_cand if final_cand.exists() else adir)]
+
+    # Attempt to locate execution log file
+    actual_log = log_file or getattr(config, "log_file", None)
+    if not actual_log or not Path(actual_log).is_file():
+        candidates = [
+            Path("mlx_runs/logs") / f"{config.name}.log",
+            adir / f"{config.name}.log",
+            adir / "train.log",
+        ]
+        for c in candidates:
+            if c.is_file():
+                actual_log = c
+                break
+
+    train_losses, val_losses = parse_training_losses_from_log(actual_log)
+
+    # Strategy 1: Final adapter (last adapter trained)
+    if strat in (EVAL_STRATEGY_FINAL, "last"):
+        final_step = max(checkpoints.keys())
+        return [("Final trained adapter", checkpoints[final_step])]
+
+    # Strategy 2: Minimal validation loss
+    elif strat in (EVAL_STRATEGY_MIN_VAL_LOSS, "min_val_loss"):
+        matched_steps = [s for s in checkpoints if s in val_losses]
+        if matched_steps:
+            best_step = min(matched_steps, key=lambda s: val_losses[s])
+            best_loss = val_losses[best_step]
+            return [(f"Adapter with minimal validation loss (step {best_step}, val loss {best_loss:.4f})", checkpoints[best_step])]
+        else:
+            final_step = max(checkpoints.keys())
+            return [("Final trained adapter (fallback: no val loss in log)", checkpoints[final_step])]
+
+    # Strategy 3: Minimal training loss
+    elif strat in (EVAL_STRATEGY_MIN_TRAIN_LOSS, "min_train_loss"):
+        step_to_loss = {}
+        for s in checkpoints:
+            if s in train_losses:
+                step_to_loss[s] = train_losses[s]
+            else:
+                preceding = [train_losses[k] for k in sorted(train_losses.keys()) if k <= s]
+                if preceding:
+                    step_to_loss[s] = preceding[-1]
+
+        if step_to_loss:
+            best_step = min(step_to_loss, key=lambda s: step_to_loss[s])
+            best_loss = step_to_loss[best_step]
+            return [(f"Adapter with minimal training loss (step {best_step}, train loss {best_loss:.4f})", checkpoints[best_step])]
+        else:
+            final_step = max(checkpoints.keys())
+            return [("Final trained adapter (fallback: no train loss in log)", checkpoints[final_step])]
+
+    # Strategy 4: Every single adapter
+    elif strat in (EVAL_STRATEGY_ALL, "all", "every"):
+        results = []
+        for s in sorted(checkpoints.keys()):
+            loss_info = []
+            if s in val_losses:
+                loss_info.append(f"val loss {val_losses[s]:.4f}")
+            if s in train_losses:
+                loss_info.append(f"train loss {train_losses[s]:.4f}")
+            loss_str = f" ({', '.join(loss_info)})" if loss_info else ""
+            results.append((f"Adapter step {s}{loss_str}", checkpoints[s]))
+        return results
+
+    # Default fallback
+    final_step = max(checkpoints.keys())
+    return [("Final trained adapter", checkpoints[final_step])]
+
+
+@contextmanager
+def active_checkpoint_context(checkpoint_path: Union[str, Path]):
+    """
+    Context manager that prepares an adapter directory structure for mlx_lm / mlx_vlm.
+    If checkpoint_path is a directory or adapters.safetensors, it yields the directory path.
+    If checkpoint_path is a specific intermediate .safetensors file, creates a temporary
+    directory with symlinked adapters.safetensors and adapter_config.json, ensuring 100%
+    engine compatibility across all MLX versions.
+    """
+    p = Path(checkpoint_path)
+    if not p.exists():
+        yield str(p)
+        return
+
+    if p.is_dir():
+        yield str(p.resolve())
+        return
+
+    if p.name == "adapters.safetensors":
+        yield str(p.parent.resolve())
+        return
+
+    with tempfile.TemporaryDirectory(prefix="mlx_ckpt_eval_") as tmp_dir:
+        tmp_p = Path(tmp_dir)
+        (tmp_p / "adapters.safetensors").symlink_to(p.resolve())
+        cfg_cand = p.parent / "adapter_config.json"
+        if cfg_cand.is_file():
+            (tmp_p / "adapter_config.json").symlink_to(cfg_cand.resolve())
+        yield str(tmp_p)
+
+
 def run_generative_eval(
     config: LoraRunConfig,
     data_path: Optional[Union[Path, str]] = None,
     max_samples: Optional[int] = None,
     mock_predictions: Optional[List[str]] = None,
     mock_baseline: Optional[List[str]] = None,
+    strategy: Optional[str] = None,
+    log_file: Optional[Union[Path, str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Execute full generative evaluation pipeline on the test split for a completed LoRA run.
+    Supports evaluating final adapter, minimum validation loss adapter, minimum training loss adapter,
+    or all discovered adapter checkpoints according to config.eval_adapter_strategy.
     """
     ds_path = Path(data_path or config.data)
     samples = load_test_dataset(ds_path)
@@ -423,20 +649,8 @@ def run_generative_eval(
         samples = samples[:max_samples]
 
     total_samples = len(samples)
-    prompts = [s["prompt"] for s in samples]
     goldens = [s["golden"] for s in samples]
     engine = getattr(config, "engine", "mlx_lm")
-
-    # Explicit checkpoint path identification
-    adapter_p = Path(config.adapter_path)
-    if adapter_p.is_dir():
-        cand = adapter_p / "adapters.safetensors"
-        target_checkpoint_str = str(cand.resolve() if cand.exists() else adapter_p.resolve())
-    elif adapter_p.exists():
-        target_checkpoint_str = str(adapter_p.resolve())
-    else:
-        target_checkpoint_str = f"{adapter_p} (adapters.safetensors)"
-
     test_file_path = ds_path / "test.jsonl" if ds_path.is_dir() else ds_path
 
     # Dynamic, model-dependent throughput and time estimation based on parameter size, quantization, and Apple Silicon bandwidth
@@ -447,14 +661,6 @@ def run_generative_eval(
     )
     est_str = throughput_est["est_duration_str"]
     summary_label = throughput_est["summary_label"]
-
-    print("\n[MLX Commander] Starting Generative Evaluation on test set:")
-    print(f"  • Target Checkpoint: {target_checkpoint_str} (Final trained adapter)")
-    print(f"  • Base Model:        {config.model} [Engine: {engine}]")
-    print(f"  • Test Dataset:      {test_file_path} (Full split: {total_samples} samples)")
-    print(f"  • Evaluation Passes: 2 passes (Baseline + Fine-Tuned = {total_samples * 2} generations)")
-    print(f"  • Estimated Time:    {est_str} ({summary_label})")
-    sys.stdout.flush()
 
     # 1. Baseline Predictions (Pre-trained Model without LoRA)
     adapter_base_dir = Path(config.adapter_path).parent if "/" in config.adapter_path else Path("adapters")
@@ -470,127 +676,157 @@ def run_generative_eval(
             engine=engine,
         )
 
-    # 2. Fine-Tuned Model Predictions (With LoRA Adapter)
-    if mock_predictions is not None:
-        ft_preds = mock_predictions[:total_samples]
-        tps = 45.0
-        elapsed_time = 0.5
-    else:
-        ft_preds, elapsed_time, tps = run_inference_batch(
-            model_name=config.model,
-            adapter_path=config.adapter_path,
-            prompts=samples,
-            phase_label="2/2 Fine-Tuned Adapter",
-            engine=engine,
-        )
-
-    # 3. Evaluate Metrics per sample
-    sample_eval_rows: List[Dict[str, Any]] = []
-    transitions: List[str] = []
-    em_count = 0
-    norm_em_count = 0
-    substr_count = 0
-    total_f1 = 0.0
-    total_prec = 0.0
-    total_rec = 0.0
-
-    for idx, (s, b_pred, ft_pred) in enumerate(zip(samples, baseline_preds, ft_preds)):
-        gold = s["golden"]
-        strict_em = compute_exact_match(ft_pred, gold, normalize=False)
-        norm_em = compute_exact_match(ft_pred, gold, normalize=True)
-        substr_m = compute_substring_match(ft_pred, gold)
-        word_m = compute_word_metrics(ft_pred, gold)
-
-        # Baseline accuracy for transition
-        base_correct = compute_substring_match(b_pred, gold) or compute_exact_match(b_pred, gold, normalize=True)
-        ft_correct = substr_m or norm_em
-        trans_status = classify_transition(base_correct, ft_correct)
-        transitions.append(trans_status)
-
-        if strict_em:
-            em_count += 1
-        if norm_em:
-            norm_em_count += 1
-        if substr_m:
-            substr_count += 1
-
-        total_f1 += word_m["f1"]
-        total_prec += word_m["precision"]
-        total_rec += word_m["recall"]
-
-        sample_eval_rows.append({
-            "id": s["id"],
-            "prompt": s["prompt"],
-            "golden": gold,
-            "baseline_output": b_pred,
-            "model_output": ft_pred,
-            "status": trans_status,
-            "exact_match_strict": strict_em,
-            "exact_match_norm": norm_em,
-            "substring_match": substr_m,
-            "word_f1": word_m["f1"],
-            "word_precision": word_m["precision"],
-            "word_recall": word_m["recall"],
-        })
-
-    # 4. Aggregated Macro Metrics
-    exact_match_pct = round((norm_em_count / total_samples) * 100.0, 1)
-    substring_match_pct = round((substr_count / total_samples) * 100.0, 1)
-    avg_f1 = round(total_f1 / total_samples, 4)
-    avg_prec = round(total_prec / total_samples, 4)
-    avg_rec = round(total_rec / total_samples, 4)
-
-    migration_matrix = build_migration_matrix(transitions)
-    confusion_matrix = build_confusion_matrix(goldens, ft_preds)
-
-    summary: Dict[str, Any] = {
-        "run_id": config.id,
-        "run_name": config.name,
-        "model": config.model,
-        "adapter_path": config.adapter_path,
-        "total_samples": total_samples,
-        "exact_match_pct": exact_match_pct,
-        "exact_match_strict_pct": round((em_count / total_samples) * 100.0, 1),
-        "substring_match_pct": substring_match_pct,
-        "avg_word_f1": avg_f1,
-        "avg_word_prec": avg_prec,
-        "avg_word_recall": avg_rec,
-        "tokens_per_sec": tps,
-        "fixed_count": migration_matrix["fixed_count"],
-        "regressed_count": migration_matrix["regressed_count"],
-        "migration_matrix": migration_matrix,
-        "confusion_matrix": confusion_matrix,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-    }
-
-    # Display the model confusion map matrix in the CLI
-    cli_matrices_text = format_cli_eval_summary_matrices(summary)
-    if cli_matrices_text:
-        print("\n" + cli_matrices_text + "\n")
-        sys.stdout.flush()
-
-    # 5. Persist 3-Tier Storage Artifacts
+    # Resolve target checkpoint(s) based on user strategy
+    targets = resolve_eval_checkpoints(config, strategy=strategy, log_file=log_file)
+    results: List[Dict[str, Any]] = []
     run_adapter_dir = Path(config.adapter_path)
     leaderboard_csv = adapter_base_dir / "eval_leaderboard.csv"
     html_dashboard = adapter_base_dir / "eval_comparison.html"
 
-    # Tier 1: CSV Leaderboard
-    append_to_leaderboard_csv(leaderboard_csv, config.to_dict(), summary)
+    for t_idx, (target_label, target_ckpt) in enumerate(targets, 1):
+        target_checkpoint_str = str(target_ckpt.resolve() if target_ckpt.exists() else target_ckpt)
+        if len(targets) > 1:
+            print(f"\n[MLX Commander] [{t_idx}/{len(targets)}] Evaluating Checkpoint: {target_checkpoint_str} ({target_label})")
+        else:
+            print("\n[MLX Commander] Starting Generative Evaluation on test set:")
+            print(f"  • Target Checkpoint: {target_checkpoint_str} ({target_label})")
+            print(f"  • Base Model:        {config.model} [Engine: {engine}]")
+            print(f"  • Test Dataset:      {test_file_path} (Full split: {total_samples} samples)")
+            print(f"  • Evaluation Passes: 2 passes (Baseline + Fine-Tuned = {total_samples * 2} generations)")
+            print(f"  • Estimated Time:    {est_str} ({summary_label})")
+        sys.stdout.flush()
 
-    # Tier 2: Per-run JSON & JSONL
-    save_run_predictions(run_adapter_dir, summary, sample_eval_rows)
+        # 2. Fine-Tuned Model Predictions (With LoRA Adapter Checkpoint)
+        with active_checkpoint_context(target_ckpt) as active_adapter_dir:
+            if mock_predictions is not None:
+                ft_preds = mock_predictions[:total_samples]
+                tps = 45.0
+                elapsed_time = 0.5
+            else:
+                phase_label = f"2/2 Adapter [{target_label}]" if len(targets) > 1 else "2/2 Fine-Tuned Adapter"
+                ft_preds, elapsed_time, tps = run_inference_batch(
+                    model_name=config.model,
+                    adapter_path=active_adapter_dir,
+                    prompts=samples,
+                    phase_label=phase_label,
+                    engine=engine,
+                )
 
-    # Tier 3: Standalone HTML Dashboard
-    generate_html_dashboard(
-        dashboard_path=html_dashboard,
-        leaderboard_csv_path=leaderboard_csv,
-        current_run_summary=summary,
-        current_predictions=sample_eval_rows,
-    )
+        # 3. Evaluate Metrics per sample
+        sample_eval_rows: List[Dict[str, Any]] = []
+        transitions: List[str] = []
+        em_count = 0
+        norm_em_count = 0
+        substr_count = 0
+        total_f1 = 0.0
+        total_prec = 0.0
+        total_rec = 0.0
 
-    return {
-        "summary": summary,
-        "predictions": sample_eval_rows,
-        "leaderboard_csv": str(leaderboard_csv),
-        "html_dashboard": str(html_dashboard),
-    }
+        for idx, (s, b_pred, ft_pred) in enumerate(zip(samples, baseline_preds, ft_preds)):
+            gold = s["golden"]
+            strict_em = compute_exact_match(ft_pred, gold, normalize=False)
+            norm_em = compute_exact_match(ft_pred, gold, normalize=True)
+            substr_m = compute_substring_match(ft_pred, gold)
+            word_m = compute_word_metrics(ft_pred, gold)
+
+            base_correct = compute_substring_match(b_pred, gold) or compute_exact_match(b_pred, gold, normalize=True)
+            ft_correct = substr_m or norm_em
+            trans_status = classify_transition(base_correct, ft_correct)
+            transitions.append(trans_status)
+
+            if strict_em:
+                em_count += 1
+            if norm_em:
+                norm_em_count += 1
+            if substr_m:
+                substr_count += 1
+
+            total_f1 += word_m["f1"]
+            total_prec += word_m["precision"]
+            total_rec += word_m["recall"]
+
+            sample_eval_rows.append({
+                "id": s["id"],
+                "prompt": s["prompt"],
+                "golden": gold,
+                "baseline_output": b_pred,
+                "model_output": ft_pred,
+                "status": trans_status,
+                "exact_match_strict": strict_em,
+                "exact_match_norm": norm_em,
+                "substring_match": substr_m,
+                "word_f1": word_m["f1"],
+                "word_precision": word_m["precision"],
+                "word_recall": word_m["recall"],
+            })
+
+        # 4. Aggregated Macro Metrics
+        exact_match_pct = round((norm_em_count / total_samples) * 100.0, 1)
+        substring_match_pct = round((substr_count / total_samples) * 100.0, 1)
+        avg_f1 = round(total_f1 / total_samples, 4)
+        avg_prec = round(total_prec / total_samples, 4)
+        avg_rec = round(total_rec / total_samples, 4)
+
+        migration_matrix = build_migration_matrix(transitions)
+        confusion_matrix = build_confusion_matrix(goldens, ft_preds)
+
+        run_name_with_target = f"{config.name} ({target_label})" if len(targets) > 1 else config.name
+        summary: Dict[str, Any] = {
+            "run_id": config.id if len(targets) == 1 else f"{config.id}_ckpt{t_idx}",
+            "run_name": run_name_with_target,
+            "target_label": target_label,
+            "checkpoint_path": target_checkpoint_str,
+            "model": config.model,
+            "adapter_path": config.adapter_path,
+            "total_samples": total_samples,
+            "exact_match_pct": exact_match_pct,
+            "exact_match_strict_pct": round((em_count / total_samples) * 100.0, 1),
+            "substring_match_pct": substring_match_pct,
+            "avg_word_f1": avg_f1,
+            "avg_word_prec": avg_prec,
+            "avg_word_recall": avg_rec,
+            "tokens_per_sec": tps,
+            "fixed_count": migration_matrix["fixed_count"],
+            "regressed_count": migration_matrix["regressed_count"],
+            "migration_matrix": migration_matrix,
+            "confusion_matrix": confusion_matrix,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+        # Display the model confusion map matrix in the CLI
+        cli_matrices_text = format_cli_eval_summary_matrices(summary)
+        if cli_matrices_text:
+            print("\n" + cli_matrices_text + "\n")
+            sys.stdout.flush()
+
+        # 5. Persist 3-Tier Storage Artifacts
+        cfg_dict = config.to_dict()
+        cfg_dict["name"] = run_name_with_target
+        cfg_dict["target_label"] = target_label
+        append_to_leaderboard_csv(leaderboard_csv, cfg_dict, summary)
+
+        save_predictions_dir = run_adapter_dir if len(targets) == 1 else (run_adapter_dir / f"eval_ckpt_{t_idx}")
+        save_run_predictions(save_predictions_dir, summary, sample_eval_rows)
+
+        generate_html_dashboard(
+            dashboard_path=html_dashboard,
+            leaderboard_csv_path=leaderboard_csv,
+            current_run_summary=summary,
+            current_predictions=sample_eval_rows,
+        )
+
+        results.append({
+            "summary": summary,
+            "predictions": sample_eval_rows,
+            "leaderboard_csv": str(leaderboard_csv),
+            "html_dashboard": str(html_dashboard),
+        })
+
+    if not results:
+        return None
+
+    primary_result = results[-1]
+    if len(results) > 1:
+        primary_result["all_eval_results"] = results
+    return primary_result
+

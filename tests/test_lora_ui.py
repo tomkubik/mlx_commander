@@ -455,14 +455,111 @@ class TestLoraUI(unittest.TestCase):
         state.lora_right_focus_idx = 13  # Run evals on test set (experimental)
         self.assertFalse(state.lora_config.run_eval)
 
-        # Press Enter (10) then 'q'
+        # Press Enter (10) to open dialog, Enter (10) to select choice 0 ('final'), then 'q' to exit
         self.mock_win.reset_mock()
         self.mock_win.getmaxyx.return_value = (35, 120)
-        self.mock_win.getch.side_effect = [10, ord("q")]
+        self.mock_win.getch.side_effect = [10, 10, ord("q")]
 
         run_commander_tui(self.mock_win, initial_state=state)
         self.assertTrue(state.lora_config.run_eval)
-        self.assertIn("Run evals on test set (experimental): Yes", state.status_message)
+        self.assertEqual(state.lora_config.eval_adapter_strategy, "final")
+        self.assertIn("Test set evaluation set to:", state.status_message)
+
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_mode2_select_best_val_loss_eval_adapter(self, mock_curs, mock_colors, mock_has_colors):
+        state = CommanderState()
+        state.active_tab = 1
+        state.lora_active_panel = "right"
+        state.lora_right_focus_idx = 13
+        self.assertFalse(state.lora_config.run_eval)
+
+        # Press Enter (10) -> choice dialog, KEY_DOWN (1) -> min val loss, Enter (10) -> confirm, 'q' -> exit
+        self.mock_win.reset_mock()
+        self.mock_win.getmaxyx.return_value = (35, 120)
+        self.mock_win.getch.side_effect = [10, curses.KEY_DOWN, 10, ord("q")]
+
+        run_commander_tui(self.mock_win, initial_state=state)
+        self.assertTrue(state.lora_config.run_eval)
+        self.assertEqual(state.lora_config.eval_adapter_strategy, "best_val_loss")
+        self.assertIn("minimal validation loss", state.status_message.lower())
+
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_mode2_select_best_train_loss_eval_adapter(self, mock_curs, mock_colors, mock_has_colors):
+        state = CommanderState()
+        state.active_tab = 1
+        state.lora_active_panel = "right"
+        state.lora_right_focus_idx = 13
+
+        # Press Enter (10) -> choice dialog, KEY_DOWN x2 -> min train loss, Enter (10) -> confirm, 'q' -> exit
+        self.mock_win.reset_mock()
+        self.mock_win.getmaxyx.return_value = (35, 120)
+        self.mock_win.getch.side_effect = [10, curses.KEY_DOWN, curses.KEY_DOWN, 10, ord("q")]
+
+        run_commander_tui(self.mock_win, initial_state=state)
+        self.assertTrue(state.lora_config.run_eval)
+        self.assertEqual(state.lora_config.eval_adapter_strategy, "best_train_loss")
+        self.assertIn("minimal training loss", state.status_message.lower())
+
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_mode2_select_all_adapters_eval(self, mock_curs, mock_colors, mock_has_colors):
+        state = CommanderState()
+        state.active_tab = 1
+        state.lora_active_panel = "right"
+        state.lora_right_focus_idx = 13
+
+        # Press Enter (10) -> choice dialog, KEY_DOWN x3 -> all adapters, Enter (10) -> confirm, 'q' -> exit
+        self.mock_win.reset_mock()
+        self.mock_win.getmaxyx.return_value = (35, 120)
+        self.mock_win.getch.side_effect = [10, curses.KEY_DOWN, curses.KEY_DOWN, curses.KEY_DOWN, 10, ord("q")]
+
+        run_commander_tui(self.mock_win, initial_state=state)
+        self.assertTrue(state.lora_config.run_eval)
+        self.assertEqual(state.lora_config.eval_adapter_strategy, "all")
+        self.assertIn("every single adapter", state.status_message.lower())
+
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_mode2_cancel_choice_dialog_preserves_state(self, mock_curs, mock_colors, mock_has_colors):
+        state = CommanderState()
+        state.active_tab = 1
+        state.lora_active_panel = "right"
+        state.lora_right_focus_idx = 13
+        state.lora_config.run_eval = False
+
+        # Press Enter (10) -> choice dialog, Esc (27) -> cancel, 'q' -> exit
+        self.mock_win.reset_mock()
+        self.mock_win.getmaxyx.return_value = (35, 120)
+        self.mock_win.getch.side_effect = [10, 27, ord("q")]
+
+        run_commander_tui(self.mock_win, initial_state=state)
+        self.assertFalse(state.lora_config.run_eval)
+
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_mode3_select_eval_adapter_strategy(self, mock_curs, mock_colors, mock_has_colors):
+        state = CommanderState()
+        state.active_tab = 2  # Mode 3: Multi-Run Matrix
+        state.multi_active_panel = "right"
+        state.multi_right_focus_idx = 13  # Run evals on test set
+        self.assertEqual(state.multi_lora_config.run_eval, [False])
+
+        # Press Enter (10) -> choice dialog, KEY_DOWN (1) -> min val loss, Enter (10) -> confirm, 'q' -> exit
+        self.mock_win.reset_mock()
+        self.mock_win.getmaxyx.return_value = (35, 120)
+        self.mock_win.getch.side_effect = [10, curses.KEY_DOWN, 10, ord("q")]
+
+        run_commander_tui(self.mock_win, initial_state=state)
+        self.assertEqual(state.multi_lora_config.run_eval, [True])
+        self.assertEqual(state.multi_lora_config.eval_adapter_strategy, "best_val_loss")
+        self.assertIn("Sweep test set evaluation set to:", state.status_message)
 
     @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
     @patch("mlx_commander.tui.app.init_colors")
@@ -600,6 +697,41 @@ class TestLoraUI(unittest.TestCase):
         self.assertEqual(len(pending), 1)
         self.assertEqual(pending[0].model, "mlx-community/Llama-3.2-3B-Instruct-4bit")
         mock_spawn.assert_called_once()
+
+    @patch("mlx_commander.tui.app.show_text_edit_dialog", return_value="/Volumes/Storage/custom_adapters")
+    def test_adapter_path_edit_and_save_custom_value(self, mock_edit_dialog):
+        """Verify editing Adapter Path saves the custom path, sets is_custom_name, and updates status."""
+        from mlx_commander.tui.app import _handle_mode2_input
+        state = CommanderState()
+        state.active_tab = 1
+        state.lora_active_panel = "right"
+        state.lora_right_focus_idx = 14  # Adapter Out field
+
+        _handle_mode2_input(self.mock_win, state, 10)  # Enter
+
+        mock_edit_dialog.assert_called_once()
+        self.assertEqual(state.lora_config.adapter_path, "/Volumes/Storage/custom_adapters")
+        self.assertTrue(state.lora_config.is_custom_name)
+        self.assertIn("/Volumes/Storage/custom_adapters", state.status_message)
+        self.assertFalse(state.status_is_error)
+
+    @patch("mlx_commander.tui.app.show_text_edit_dialog", return_value="   ")
+    def test_adapter_path_edit_reset_to_default_on_empty(self, mock_edit_dialog):
+        """Verify entering empty value resets Adapter Path to default and is_custom_name to False."""
+        from mlx_commander.tui.app import _handle_mode2_input
+        state = CommanderState()
+        state.active_tab = 1
+        state.lora_active_panel = "right"
+        state.lora_right_focus_idx = 14  # Adapter Out field
+        state.lora_config.adapter_path = "/custom/adapters"
+        state.lora_config.is_custom_name = True
+
+        _handle_mode2_input(self.mock_win, state, 10)  # Enter
+
+        mock_edit_dialog.assert_called_once()
+        self.assertFalse(state.lora_config.is_custom_name)
+        self.assertTrue(state.lora_config.adapter_path.startswith("adapters/"))
+        self.assertIn("reset to default", state.status_message)
 
 
 if __name__ == "__main__":

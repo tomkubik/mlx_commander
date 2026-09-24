@@ -376,7 +376,7 @@ def execute_single_run(
             print("\n[MLX Commander] Running Generative Evaluation on test set...")
             try:
                 from ..evals.runner import run_generative_eval
-                eval_res = run_generative_eval(r)
+                eval_res = run_generative_eval(r, log_file=log_file)
                 if eval_res and "summary" in eval_res:
                     summ = eval_res["summary"]
                     tracker.log_eval(eval_res)

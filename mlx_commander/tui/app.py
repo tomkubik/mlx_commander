@@ -34,6 +34,10 @@ from mlx_commander.splitter import (
     generate_random_seed,
 )
 from mlx_commander.lora import (
+    EVAL_STRATEGY_CHOICES,
+    EVAL_STRATEGY_DISABLED,
+    EVAL_STRATEGY_DISPLAY_MAP,
+    EVAL_STRATEGY_FINAL,
     FINE_TUNE_TYPES,
     OPTIMIZERS,
     POPULAR_MLX_MODELS,
@@ -951,7 +955,17 @@ def _draw_mode2_dashboard(
         (10, "Mask Prompt", "True" if cfg.mask_prompt else "False", 10, False),
         (11, "Save Every", str(cfg.save_every), 8, False),
         (12, 'Steps per "Eval" (validation loss)', str(cfg.steps_per_eval), 8, False),
-        (13, "Run evals on test set (experimental)", "Yes" if getattr(cfg, "run_eval", False) else "No", 8, False),
+        (
+            13,
+            "Run evals on test set (experimental)",
+            EVAL_STRATEGY_DISPLAY_MAP.get(getattr(cfg, "eval_adapter_strategy", EVAL_STRATEGY_FINAL), "Yes")
+            if getattr(cfg, "run_eval", False)
+            else "No",
+            max(14, len(EVAL_STRATEGY_DISPLAY_MAP.get(getattr(cfg, "eval_adapter_strategy", EVAL_STRATEGY_FINAL), "Yes")) + 2)
+            if getattr(cfg, "run_eval", False)
+            else 8,
+            False,
+        ),
         (14, "Adapter Path", cfg.adapter_path, max(14, right_w - 20), False),
         (15, "+ Add to Queue (F6)", "", 0, True),
     ]
@@ -1211,7 +1225,15 @@ def _draw_mode3_dashboard(
         (10, "Mask Prompt", cfg.mask_prompt, bool, False),
         (11, "Save Every", cfg.save_every, int, False),
         (12, 'Steps per "Eval" (validation loss)', cfg.steps_per_eval, int, False),
-        (13, "Run evals on test set (experimental)", getattr(cfg, "run_eval", [False]), bool, False),
+        (
+            13,
+            "Run evals on test set (experimental)",
+            [EVAL_STRATEGY_DISPLAY_MAP.get(getattr(cfg, "eval_adapter_strategy", EVAL_STRATEGY_FINAL), "Yes")]
+            if any(getattr(cfg, "run_eval", [False]))
+            else [False],
+            bool,
+            False,
+        ),
         (14, "+ Add Sweep to Queue (F6)", [], None, True),
     ]
 
@@ -1778,14 +1800,45 @@ def _handle_mode2_input(
                     try: state.lora_config.steps_per_eval = max(1, int(val))
                     except ValueError: pass
             elif idx == 13:  # Run evals on test set (experimental)
-                state.lora_config.run_eval = not getattr(state.lora_config, "run_eval", False)
-                state.status_message = f"Run evals on test set (experimental): {'Yes' if state.lora_config.run_eval else 'No'}"
-                state.status_is_error = False
+                choice_labels = [label for _, label in EVAL_STRATEGY_CHOICES]
+                curr_strat = getattr(state.lora_config, "eval_adapter_strategy", EVAL_STRATEGY_FINAL)
+                curr_enabled = getattr(state.lora_config, "run_eval", False)
+                if not curr_enabled:
+                    curr_choice = choice_labels[0]
+                else:
+                    curr_choice = next((label for s, label in EVAL_STRATEGY_CHOICES if s == curr_strat), choice_labels[0])
+
+                chosen = show_choice_dialog(
+                    stdscr,
+                    "Test Set Evaluation Adapters",
+                    "Select which trained adapter to evaluate on test.jsonl:",
+                    choice_labels,
+                    current_val=curr_choice,
+                )
+                if chosen:
+                    strat_map = {label: s for s, label in EVAL_STRATEGY_CHOICES}
+                    selected_strat = strat_map.get(chosen, EVAL_STRATEGY_FINAL)
+                    if selected_strat == EVAL_STRATEGY_DISABLED:
+                        state.lora_config.run_eval = False
+                        state.status_message = "Test set evaluation disabled."
+                    else:
+                        state.lora_config.run_eval = True
+                        state.lora_config.eval_adapter_strategy = selected_strat
+                        state.status_message = f"Test set evaluation set to: {chosen}"
+                    state.status_is_error = False
             elif idx == 14:  # Adapter Out
                 val = show_text_edit_dialog(stdscr, "Adapter Path", "Directory to store fine-tuned LoRA weights:", state.lora_config.adapter_path)
-                if val:
-                    state.lora_config.adapter_path = val.strip()
-                    state.lora_config.is_custom_name = True
+                if val is not None:
+                    cleaned = val.strip()
+                    if cleaned:
+                        state.lora_config.adapter_path = cleaned
+                        state.lora_config.is_custom_name = True
+                        state.status_message = f"Adapter path set to: {state.lora_config.adapter_path}"
+                    else:
+                        state.lora_config.is_custom_name = False
+                        state.update_deterministic_lora_name()
+                        state.status_message = f"Adapter path reset to default: {state.lora_config.adapter_path}"
+                    state.status_is_error = False
             elif idx == 15:  # Add to Queue
                 if validate_lora_queue_preconditions(stdscr, state.lora_config.model, state.lora_config.data, config=state.lora_config):
                     state.update_deterministic_lora_name()
@@ -1955,8 +2008,11 @@ def _handle_mode3_input(
                 state.multi_lora_config.train = not state.multi_lora_config.train
             elif idx == 5:  # Adapters dir
                 val = show_text_edit_dialog(stdscr, "Adapters Directory", "Base directory for saved adapter weights:", default_val=state.multi_lora_config.adapter_path)
-                if val:
-                    state.multi_lora_config.adapter_path = val.strip()
+                if val is not None:
+                    cleaned = val.strip()
+                    state.multi_lora_config.adapter_path = cleaned if cleaned else "adapters"
+                    state.status_message = f"Adapters directory set to: {state.multi_lora_config.adapter_path}"
+                    state.status_is_error = False
 
     # Navigation in Right Panel (Multi-Run Hyperparameters)
     elif state.multi_active_panel == "right":
@@ -1977,21 +2033,49 @@ def _handle_mode3_input(
             idx = state.multi_right_focus_idx
             if idx < 14:
                 field_name, field_label, field_type = SWEEP_FIELD_DEFS[idx]
-                curr_vals = state.multi_lora_config.get_field_values(field_name)
-                chosen_vals = show_multi_value_edit_dialog(
-                    stdscr,
-                    title=f"Edit {field_label}",
-                    prompt=f"Enter conditions for {field_label}:",
-                    current_values=curr_vals,
-                    val_type=field_type,
-                )
-                if chosen_vals:
-                    state.multi_lora_config.set_field_values(field_name, chosen_vals)
-                    if field_name == "batch_size" and getattr(state.multi_lora_config, "engine", "mlx_lm") == "mlx_vlm":
-                        if any(int(b) > 1 for b in chosen_vals):
-                            prompt_vlm_sweep_batch_tweak(stdscr, state.multi_lora_config)
-                    state.status_message = f"Updated {field_label} conditions: {state.multi_lora_config.get_field_values(field_name)}"
-                    state.status_is_error = False
+                if field_name == "run_eval":
+                    choice_labels = [label for _, label in EVAL_STRATEGY_CHOICES]
+                    curr_strat = getattr(state.multi_lora_config, "eval_adapter_strategy", EVAL_STRATEGY_FINAL)
+                    curr_enabled = any(getattr(state.multi_lora_config, "run_eval", [False]))
+                    if not curr_enabled:
+                        curr_choice = choice_labels[0]
+                    else:
+                        curr_choice = next((label for s, label in EVAL_STRATEGY_CHOICES if s == curr_strat), choice_labels[0])
+
+                    chosen = show_choice_dialog(
+                        stdscr,
+                        "Test Set Evaluation Adapters",
+                        "Select which trained adapter to evaluate on test.jsonl across sweep runs:",
+                        choice_labels,
+                        current_val=curr_choice,
+                    )
+                    if chosen:
+                        strat_map = {label: s for s, label in EVAL_STRATEGY_CHOICES}
+                        selected_strat = strat_map.get(chosen, EVAL_STRATEGY_FINAL)
+                        if selected_strat == EVAL_STRATEGY_DISABLED:
+                            state.multi_lora_config.run_eval = [False]
+                            state.status_message = "Test set evaluation disabled for sweep."
+                        else:
+                            state.multi_lora_config.run_eval = [True]
+                            state.multi_lora_config.eval_adapter_strategy = selected_strat
+                            state.status_message = f"Sweep test set evaluation set to: {chosen}"
+                        state.status_is_error = False
+                else:
+                    curr_vals = state.multi_lora_config.get_field_values(field_name)
+                    chosen_vals = show_multi_value_edit_dialog(
+                        stdscr,
+                        title=f"Edit {field_label}",
+                        prompt=f"Enter conditions for {field_label}:",
+                        current_values=curr_vals,
+                        val_type=field_type,
+                    )
+                    if chosen_vals:
+                        state.multi_lora_config.set_field_values(field_name, chosen_vals)
+                        if field_name == "batch_size" and getattr(state.multi_lora_config, "engine", "mlx_lm") == "mlx_vlm":
+                            if any(int(b) > 1 for b in chosen_vals):
+                                prompt_vlm_sweep_batch_tweak(stdscr, state.multi_lora_config)
+                        state.status_message = f"Updated {field_label} conditions: {state.multi_lora_config.get_field_values(field_name)}"
+                        state.status_is_error = False
             elif idx == 14:  # Add sweep to queue
                 if validate_lora_queue_preconditions(stdscr, state.multi_lora_config.model, state.multi_lora_config.data, multi_config=state.multi_lora_config):
                     from mlx_commander.lora.model_info import normalize_model_path
@@ -2160,32 +2244,127 @@ def run_commander_tui(
         footer_y = max_y - 1
         if ThemeMode.is_norton(state.theme_mode):
             if state.active_tab == 0:
-                fn_items = [
-                    ("1", "Help"),
-                    ("2", "Mode"),
-                    ("3", "Output"),
-                    ("5", "Convert"),
-                    ("F9", "Theme"),
-                    ("10", "Exit"),
-                ]
+                if max_x >= 100:
+                    fn_items = [
+                        ("Tab", "Switch"),
+                        ("Enter", "Select"),
+                        ("1", "Help"),
+                        ("2", "Mode"),
+                        ("3", "Output"),
+                        ("5", "Convert"),
+                        ("F9", "Theme"),
+                        ("10", "Exit"),
+                    ]
+                elif max_x >= 80:
+                    fn_items = [
+                        ("Tab", "Switch"),
+                        ("1", "Help"),
+                        ("2", "Mode"),
+                        ("3", "Output"),
+                        ("5", "Convert"),
+                        ("F9", "Theme"),
+                        ("10", "Exit"),
+                    ]
+                elif max_x >= 68:
+                    fn_items = [
+                        ("Tab", "Switch"),
+                        ("1", "Help"),
+                        ("2", "Mode"),
+                        ("5", "Convert"),
+                        ("F9", "Theme"),
+                        ("10", "Exit"),
+                    ]
+                else:
+                    fn_items = [
+                        ("1", "Help"),
+                        ("2", "Mode"),
+                        ("5", "Convert"),
+                        ("F9", "Theme"),
+                        ("10", "Exit"),
+                    ]
             elif state.active_tab == 1:
-                fn_items = [
-                    ("1", "Help"),
-                    ("2", "Mode"),
-                    ("5", "RunQueue"),
-                    ("6", "AddRun"),
-                    ("F9", "Theme"),
-                    ("10", "Exit"),
-                ]
+                if max_x >= 100:
+                    fn_items = [
+                        ("Tab", "Switch"),
+                        ("Enter", "Select"),
+                        ("c", "Clone"),
+                        ("d", "Del"),
+                        ("1", "Help"),
+                        ("2", "Mode"),
+                        ("5", "Run"),
+                        ("6", "Add"),
+                        ("F9", "Theme"),
+                        ("10", "Exit"),
+                    ]
+                elif max_x >= 85:
+                    fn_items = [
+                        ("Tab", "Switch"),
+                        ("c", "Clone"),
+                        ("1", "Help"),
+                        ("2", "Mode"),
+                        ("5", "Run"),
+                        ("6", "Add"),
+                        ("F9", "Theme"),
+                        ("10", "Exit"),
+                    ]
+                elif max_x >= 75:
+                    fn_items = [
+                        ("Tab", "Switch"),
+                        ("1", "Help"),
+                        ("2", "Mode"),
+                        ("5", "Run"),
+                        ("6", "Add"),
+                        ("F9", "Theme"),
+                        ("10", "Exit"),
+                    ]
+                else:
+                    fn_items = [
+                        ("1", "Help"),
+                        ("2", "Mode"),
+                        ("5", "Run"),
+                        ("F9", "Theme"),
+                        ("10", "Exit"),
+                    ]
             else:
-                fn_items = [
-                    ("1", "Help"),
-                    ("2", "Mode"),
-                    ("5", "RunSweep"),
-                    ("6", "AddSweep"),
-                    ("F9", "Theme"),
-                    ("10", "Exit"),
-                ]
+                if max_x >= 100:
+                    fn_items = [
+                        ("Tab", "Switch"),
+                        ("Enter", "Amend"),
+                        ("1", "Help"),
+                        ("2", "Mode"),
+                        ("5", "Run Sweep"),
+                        ("6", "Add Sweep"),
+                        ("F9", "Theme"),
+                        ("10", "Exit"),
+                    ]
+                elif max_x >= 85:
+                    fn_items = [
+                        ("Tab", "Switch"),
+                        ("1", "Help"),
+                        ("2", "Mode"),
+                        ("5", "Run Sweep"),
+                        ("6", "Add Sweep"),
+                        ("F9", "Theme"),
+                        ("10", "Exit"),
+                    ]
+                elif max_x >= 75:
+                    fn_items = [
+                        ("Tab", "Switch"),
+                        ("1", "Help"),
+                        ("2", "Mode"),
+                        ("5", "Run"),
+                        ("6", "Add"),
+                        ("F9", "Theme"),
+                        ("10", "Exit"),
+                    ]
+                else:
+                    fn_items = [
+                        ("1", "Help"),
+                        ("2", "Mode"),
+                        ("5", "Run"),
+                        ("F9", "Theme"),
+                        ("10", "Exit"),
+                    ]
             safe_addstr(stdscr, footer_y, 0, " " * max_x, get_color(COLOR_PANEL_BG))
             total_fn_width = sum(len(num_str) + len(lbl_str) + 3 for num_str, lbl_str in fn_items)
 

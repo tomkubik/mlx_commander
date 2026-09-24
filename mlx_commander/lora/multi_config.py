@@ -8,7 +8,7 @@ import itertools
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from .config import LoraRunConfig
+from .config import EVAL_STRATEGY_FINAL, LoraRunConfig
 from .estimator import (
     calculate_implied_epochs,
     estimate_duration,
@@ -67,6 +67,7 @@ class MultiLoraRunConfig:
     save_every: List[int] = field(default_factory=lambda: [100])
     steps_per_eval: List[int] = field(default_factory=lambda: [100])
     run_eval: List[bool] = field(default_factory=lambda: [False])
+    eval_adapter_strategy: str = EVAL_STRATEGY_FINAL
 
     def get_field_values(self, field_name: str) -> List[Any]:
         """Get the list of values for a specific hyperparameter field."""
@@ -146,6 +147,7 @@ class MultiLoraRunConfig:
                 save_every=comb_dict["save_every"],
                 steps_per_eval=comb_dict["steps_per_eval"],
                 run_eval=comb_dict["run_eval"],
+                eval_adapter_strategy=getattr(self, "eval_adapter_strategy", EVAL_STRATEGY_FINAL),
                 engine=self.engine,
                 train_vision=self.train_vision,
                 train_on_completions=self.train_on_completions,
