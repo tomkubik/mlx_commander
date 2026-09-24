@@ -623,6 +623,10 @@ class TestCommanderUI(unittest.TestCase):
             if len(call_args[0]) >= 3 and isinstance(call_args[0][2], str)
         ]
         full_rendered = " ".join(rendered_strings)
+        self.assertIn("Tab", full_rendered)
+        self.assertIn("Switch", full_rendered)
+        self.assertIn("Enter", full_rendered)
+        self.assertIn("Select", full_rendered)
         self.assertIn("Help", full_rendered)
         self.assertNotIn("Open", full_rendered)
         self.assertIn("Mode", full_rendered)
@@ -632,6 +636,82 @@ class TestCommanderUI(unittest.TestCase):
         self.assertNotIn("Scheme", full_rendered)
         self.assertIn("F9", full_rendered)
         self.assertIn("Exit", full_rendered)
+
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_norton_bottom_bar_rendering_mode1_and_mode2(self, mock_curs, mock_colors, mock_has_colors):
+        from mlx_commander.tui.state import ThemeMode
+
+        # 1. Mode 1 (Single Run) in Norton Theme
+        state1 = CommanderState(active_tab=1)
+        state1.theme_mode = ThemeMode.NORTON
+        self.mock_win.reset_mock()
+        self.mock_win.getmaxyx.return_value = (30, 110)
+        self.mock_win.getch.side_effect = [ord("q")]
+        run_commander_tui(self.mock_win, initial_state=state1)
+
+        rendered_mode1 = " ".join(
+            call_args[0][2]
+            for call_args in self.mock_win.addstr.call_args_list
+            if len(call_args[0]) >= 3 and isinstance(call_args[0][2], str)
+        )
+        self.assertIn("Tab", rendered_mode1)
+        self.assertIn("Switch", rendered_mode1)
+        self.assertIn("Enter", rendered_mode1)
+        self.assertIn("Select", rendered_mode1)
+        self.assertIn("Clone", rendered_mode1)
+        self.assertIn("Del", rendered_mode1)
+        self.assertIn("Help", rendered_mode1)
+        self.assertIn("Mode", rendered_mode1)
+        self.assertIn("Run", rendered_mode1)
+        self.assertIn("Add", rendered_mode1)
+        self.assertIn("Theme", rendered_mode1)
+        self.assertIn("Exit", rendered_mode1)
+
+        # 2. Mode 2 (Multi-Run Matrix) in Norton Theme
+        state2 = CommanderState(active_tab=2)
+        state2.theme_mode = ThemeMode.NORTON
+        self.mock_win.reset_mock()
+        self.mock_win.getmaxyx.return_value = (30, 110)
+        self.mock_win.getch.side_effect = [ord("q")]
+        run_commander_tui(self.mock_win, initial_state=state2)
+
+        rendered_mode2 = " ".join(
+            call_args[0][2]
+            for call_args in self.mock_win.addstr.call_args_list
+            if len(call_args[0]) >= 3 and isinstance(call_args[0][2], str)
+        )
+        self.assertIn("Tab", rendered_mode2)
+        self.assertIn("Switch", rendered_mode2)
+        self.assertIn("Enter", rendered_mode2)
+        self.assertIn("Amend", rendered_mode2)
+        self.assertIn("Help", rendered_mode2)
+        self.assertIn("Mode", rendered_mode2)
+        self.assertIn("Run Sweep", rendered_mode2)
+        self.assertIn("Add Sweep", rendered_mode2)
+        self.assertIn("Theme", rendered_mode2)
+        self.assertIn("Exit", rendered_mode2)
+
+        # 3. Compact mode (< 75 cols, >= 70 min required) in Mode 1
+        state_compact = CommanderState(active_tab=1)
+        state_compact.theme_mode = ThemeMode.NORTON
+        self.mock_win.reset_mock()
+        self.mock_win.getmaxyx.return_value = (30, 72)
+        self.mock_win.getch.side_effect = [ord("q")]
+        run_commander_tui(self.mock_win, initial_state=state_compact)
+
+        rendered_compact = " ".join(
+            call_args[0][2]
+            for call_args in self.mock_win.addstr.call_args_list
+            if len(call_args[0]) >= 3 and isinstance(call_args[0][2], str)
+        )
+        self.assertIn("Help", rendered_compact)
+        self.assertIn("Mode", rendered_compact)
+        self.assertIn("Run", rendered_compact)
+        self.assertIn("Theme", rendered_compact)
+        self.assertIn("Exit", rendered_compact)
+
 
     @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
     @patch("mlx_commander.tui.app.init_colors")
