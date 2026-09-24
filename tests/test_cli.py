@@ -179,12 +179,13 @@ class TestCLI(unittest.TestCase):
 
     def test_cli_no_fallback_to_wizard_on_tui_error(self):
         from unittest.mock import patch
-        with patch("mlx_commander.cli.launch_tui", side_effect=RuntimeError("curses failed")):
-            with patch("mlx_commander.cli.run_interactive_wizard") as mock_wizard:
-                ret = main(["-d", str(self.src_file)])
-                self.assertEqual(ret, 1)
-                # Ensure the interactive wizard is NEVER called as a fallback
-                mock_wizard.assert_not_called()
+        with patch("mlx_commander.cli.is_interactive_tty", return_value=True):
+            with patch("mlx_commander.cli.launch_tui", side_effect=RuntimeError("curses failed")):
+                with patch("mlx_commander.cli.run_interactive_wizard") as mock_wizard:
+                    ret = main(["-d", str(self.src_file)])
+                    self.assertEqual(ret, 1)
+                    # Ensure the interactive wizard is NEVER called as a fallback
+                    mock_wizard.assert_not_called()
 
     def test_cli_direct_conversion_default_output_folder(self):
         # When -o is omitted, direct conversion defaults to saving in <src_dir>/mlx_dataset
@@ -264,6 +265,24 @@ class TestCLI(unittest.TestCase):
         err_output = stderr_buf.getvalue()
         self.assertIn("Missing Dependency Error", err_output)
         self.assertIn("pip install pyarrow", err_output)
+
+    def test_cli_mode_flags_routing(self):
+        from unittest.mock import patch
+        test_cases = [
+            ([], 1),
+            (["--single-run"], 1),
+            (["--lora"], 1),
+            (["--multi-run"], 2),
+            (["--converter"], 0),
+            (["--dataset-converter"], 0),
+        ]
+        for flags, expected_tab in test_cases:
+            with patch("mlx_commander.cli.is_interactive_tty", return_value=True):
+                with patch("mlx_commander.cli.launch_tui", return_value=None) as mock_launch:
+                    main(flags)
+                    mock_launch.assert_called_once()
+                    prefill = mock_launch.call_args[1].get("prefill", {})
+                    self.assertEqual(prefill.get("active_tab"), expected_tab, f"Failed for flags: {flags}")
 
 
 if __name__ == "__main__":

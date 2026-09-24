@@ -102,7 +102,7 @@ class TestMultiRunStateAndUI(unittest.TestCase):
 
     def test_state_switch_mode_3(self):
         state = CommanderState()
-        self.assertEqual(state.active_tab, 0)
+        self.assertEqual(state.active_tab, 1)
         state.switch_mode(2)
         self.assertEqual(state.active_tab, 2)
         self.assertIn("Multi-Run Matrix", state.status_message)
@@ -171,7 +171,7 @@ class TestMultiRunStateAndUI(unittest.TestCase):
     @patch("mlx_commander.tui.app.init_colors")
     @patch("mlx_commander.tui.app.curses.curs_set")
     def test_mode_switcher_navigation_3_tabs(self, mock_curs, mock_colors, mock_has_colors):
-        state = CommanderState()
+        state = CommanderState(active_tab=0)
         state.queue_manager = QueueManager(self.queue_dir)
 
         # Mode 0 -> UP into mode switcher -> RIGHT to mode 1 -> RIGHT to mode 2 -> ENTER -> 'q'

@@ -145,8 +145,14 @@ print("Epochs:", calculate_implied_epochs(iters=600, batch_size=4, total_train_r
 > In `mlx-vlm` (used for Gemma 4, Qwen2-VL, PaliGemma, SmolVLM), setting `batch_size > 1` triggers attention mask shape broadcasting exceptions due to unpadded 2D/4D multimodal attention masks.
 
 MLX Commander automatically intercepts `mlx_vlm` models and applies mathematical equivalence:
-$$\text{batch\_size} \leftarrow 1$$
-$$\text{gradient\_accumulation\_steps} \leftarrow \text{batch\_size} \times \text{gradient\_accumulation\_steps}$$
+
+```math
+\begin{aligned}
+\text{batch\_size} &\leftarrow 1 \\
+\text{gradient\_accumulation\_steps} &\leftarrow \text{batch\_size} \times \text{gradient\_accumulation\_steps}
+\end{aligned}
+```
+
 This preserves the exact effective batch size and gradient dynamics while completely avoiding runtime crashes.
 
 #### Live Validation Loss Milestones:
@@ -208,7 +214,10 @@ MLX Commander includes a built-in **Generative Evaluation Engine** (`run_eval=Tr
 
 #### Physics-Grounded Throughput & ETA Estimation:
 Token generation speed is memory-bandwidth bound:
-$$\text{Throughput (tok/s)} \approx \frac{\text{Unified Memory Bandwidth (GB/s)}}{\text{Model Active Weights (GB)}} \times 0.65$$
+
+```math
+\text{Throughput (tok/s)} \approx \frac{\text{Unified Memory Bandwidth (GB/s)}}{\text{Model Active Weights (GB)}} \times 0.65
+```
 MLX Commander automatically models throughput based on parameter count and chip architecture:
 - **1B–3B 4-bit model** (~1–2 GB): ~150–350 tok/s.
 - **8B 4-bit model** (~5.2 GB): ~40–60 tok/s.

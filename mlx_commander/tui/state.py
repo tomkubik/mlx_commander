@@ -89,7 +89,7 @@ class CommanderState:
     selected_column_idx: int = 0
 
     # Status / notification
-    status_message: str = "Ready. Press Enter on Dataset to choose path or browse with Finder."
+    status_message: str = "Ready. Configure hyperparameters, [F6] Add to Queue, or [F5] Run."
     status_is_error: bool = False
 
     # Reactive preview cache
@@ -97,9 +97,9 @@ class CommanderState:
     preview_error: Optional[str] = None
 
     # Screen / Mode Navigation
-    active_tab: int = 0  # 0: Dataset Conversion, 1: Single Run, 2: Multi-Run Matrix
+    active_tab: int = 1  # 0: Dataset Conversion, 1: Single Run, 2: Multi-Run Matrix
     mode_switcher_focused: bool = False
-    mode_switcher_idx: int = 0
+    mode_switcher_idx: int = 1
 
     # LoRA Fine-Tuning Single Run State
     lora_config: LoraRunConfig = field(default_factory=LoraRunConfig)
@@ -516,14 +516,22 @@ class CommanderState:
             self.mapping = mapping_obj
             self.update_preview()
         # Mode / Active Tab
-        tab_val = config.get("active_tab") or config.get("tab") or config.get("mode")
+        tab_val = config.get("active_tab")
+        if tab_val is None:
+            tab_val = config.get("tab")
+        if tab_val is None:
+            tab_val = config.get("mode")
+
         if tab_val is not None:
-            if str(tab_val).lower().strip() in ("2", "multi", "multi_run", "multirun", "sweep"):
+            val_str = str(tab_val).lower().strip()
+            if val_str in ("2", "multi", "multi_run", "multirun", "sweep", "multi-run"):
                 self.switch_mode(2)
-            elif str(tab_val).lower().strip() in ("1", "lora", "fine_tune", "finetune", "single"):
+            elif val_str in ("1", "lora", "fine_tune", "finetune", "single", "single_run", "single-run"):
                 self.switch_mode(1)
-            elif str(tab_val).lower().strip() in ("0", "dataset", "convert"):
+            elif val_str in ("0", "dataset", "convert", "converter", "dataset_converter", "dataset-converter"):
                 self.switch_mode(0)
+        elif config.get("format"):
+            self.switch_mode(0)
 
         # Weights & Biases Tracking
         if "wandb_enabled" in config:

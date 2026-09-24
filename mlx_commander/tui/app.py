@@ -42,7 +42,11 @@ from mlx_commander.lora import (
     QueueManager,
     SWEEP_FIELD_DEFS,
 )
-from mlx_commander.terminal_spawner import is_macos, spawn_lora_queue_terminal
+from mlx_commander.terminal_spawner import (
+    ensure_adequate_terminal_size,
+    is_macos,
+    spawn_lora_queue_terminal,
+)
 from mlx_commander.tui.state import ActivePanel, CommanderState, ThemeMode
 from mlx_commander.tui.widgets import (
     COLOR_BANNER,
@@ -2075,20 +2079,30 @@ def run_commander_tui(
         MLXFormat.DPO,
     ]
 
+    try:
+        cur_y, cur_x = stdscr.getmaxyx()
+        if cur_y < 38 or cur_x < 120:
+            ensure_adequate_terminal_size(min_cols=120, min_lines=38)
+    except Exception:
+        pass
+
     while True:
         stdscr.erase()
         max_y, max_x = stdscr.getmaxyx()
 
         # Check for minimum terminal dimension
         if max_y < 16 or max_x < 70:
-            safe_addstr(stdscr, 1, 2, "Terminal window too small for MLX Commander.", curses.A_BOLD)
-            safe_addstr(stdscr, 2, 2, f"Current: {max_x}x{max_y} (Minimum required: 70x16)", curses.A_DIM)
-            safe_addstr(stdscr, 4, 2, "Please resize your terminal window or press [q] to exit.", curses.A_DIM)
-            stdscr.refresh()
-            k = stdscr.getch()
-            if k in (ord("q"), ord("Q"), 27):
-                return None
-            continue
+            ensure_adequate_terminal_size(min_cols=120, min_lines=38)
+            max_y, max_x = stdscr.getmaxyx()
+            if max_y < 16 or max_x < 70:
+                safe_addstr(stdscr, 1, 2, "Terminal window too small for MLX Commander.", curses.A_BOLD)
+                safe_addstr(stdscr, 2, 2, f"Current: {max_x}x{max_y} (Minimum required: 70x16)", curses.A_DIM)
+                safe_addstr(stdscr, 4, 2, "Please resize your terminal window or press [q] to exit.", curses.A_DIM)
+                stdscr.refresh()
+                k = stdscr.getch()
+                if k in (ord("q"), ord("Q"), 27):
+                    return None
+                continue
 
         # ----------------------------------------------------
         # 1. Header Banner with Mode Switcher Tabs
@@ -2409,6 +2423,7 @@ def launch_tui(
     prefill: Optional[Dict[str, Any]] = None,
 ) -> Optional[ConversionResult]:
     """Launch the MLX Commander full-screen curses dashboard with optional prefill."""
+    ensure_adequate_terminal_size(min_cols=120, min_lines=38)
     configure_escdelay(25)
     try:
         return curses.wrapper(run_commander_tui, default_dataset_path, initial_state, prefill)

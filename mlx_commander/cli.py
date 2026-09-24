@@ -208,9 +208,22 @@ Examples:
         help="Run sequential step-by-step terminal wizard instead of persistent MLX Commander dashboard.",
     )
     parser.add_argument(
-        "--lora",
+        "--single-run", "--lora",
         action="store_true",
-        help="Launch TUI directly in LoRA Fine-Tuning mode (Mode 2).",
+        dest="single_run",
+        help="Launch TUI directly in Single Run mode (Mode 2: Fine-Tuning). This is the default startup mode.",
+    )
+    parser.add_argument(
+        "--multi-run",
+        action="store_true",
+        dest="multi_run",
+        help="Launch TUI directly in Multi-Run Matrix mode (Mode 3: Sweeps).",
+    )
+    parser.add_argument(
+        "--converter", "--dataset-converter",
+        action="store_true",
+        dest="converter",
+        help="Launch TUI directly in Dataset Converter mode (Mode 1).",
     )
     parser.add_argument(
         "--run-queue",
@@ -431,9 +444,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         prefill_dict["output"] = args.output
     if dataset_input:
         prefill_dict["dataset"] = dataset_input
-    if args.lora:
+    if getattr(args, "converter", False) or (args.format and not getattr(args, "single_run", False) and not getattr(args, "multi_run", False)):
+        prefill_dict["tab"] = 0
+        prefill_dict["active_tab"] = 0
+    elif getattr(args, "multi_run", False):
+        prefill_dict["tab"] = 2
+        prefill_dict["active_tab"] = 2
+    elif getattr(args, "single_run", False):
         prefill_dict["tab"] = 1
         prefill_dict["active_tab"] = 1
+    else:
+        # Default startup view is Single Run (Mode 2)
+        if "active_tab" not in prefill_dict and "tab" not in prefill_dict and "mode" not in prefill_dict:
+            prefill_dict["tab"] = 1
+            prefill_dict["active_tab"] = 1
     if args.wandb_project:
         prefill_dict["wandb_project"] = args.wandb_project
     if args.no_wandb:

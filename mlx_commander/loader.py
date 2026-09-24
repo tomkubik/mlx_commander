@@ -67,6 +67,8 @@ def ensure_pyarrow() -> bool:
     Also probes standard user/system site-packages if running in an isolated environment.
     """
     global HAS_PYARROW, pa, ds, pa_ipc, pq
+    if not HAS_PYARROW and (pa is not None or pq is not None):
+        return False
     if HAS_PYARROW and pq is not None:
         return True
     try:
@@ -134,6 +136,8 @@ def ensure_pyarrow() -> bool:
 def ensure_duckdb() -> bool:
     """Ensure duckdb is imported and ready dynamically."""
     global HAS_DUCKDB, duckdb
+    if not HAS_DUCKDB and duckdb is not None:
+        return False
     if HAS_DUCKDB and duckdb is not None:
         return True
     try:
@@ -149,6 +153,8 @@ def ensure_duckdb() -> bool:
 def ensure_lance() -> bool:
     """Ensure lance is imported and ready dynamically."""
     global HAS_LANCE, lance
+    if not HAS_LANCE and lance is not None:
+        return False
     if HAS_LANCE and lance is not None:
         return True
     try:
@@ -164,6 +170,8 @@ def ensure_lance() -> bool:
 def ensure_datasets() -> bool:
     """Ensure datasets is imported and ready dynamically."""
     global HAS_DATASETS, datasets, Dataset, DatasetDict, load_from_disk
+    if not HAS_DATASETS and datasets is not None:
+        return False
     if HAS_DATASETS and datasets is not None:
         return True
     try:

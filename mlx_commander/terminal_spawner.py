@@ -9,13 +9,110 @@ import json
 import os
 import platform
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import uuid
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
+
+
+def ensure_adequate_terminal_size(min_cols: int = 120, min_lines: int = 38) -> Tuple[int, int]:
+    """
+    Ensure the terminal window is at least min_cols wide and min_lines tall so that
+    all interface elements (hyperparameters, runtime estimates, and queued runs)
+    are fully visible without vertical clipping or horizontal truncation.
+
+    Only increases size if current window is smaller than minimums; never shrinks.
+    Uses:
+      1. ANSI/VT100 escape sequence: \\033[8;{lines};{cols}t
+      2. macOS AppleScript (Terminal.app and iTerm2)
+    """
+    if not is_terminal_interactive():
+        try:
+            return shutil.get_terminal_size((min_cols, min_lines))
+        except Exception:
+            return min_cols, min_lines
+    try:
+        cur_cols, cur_lines = shutil.get_terminal_size((80, 24))
+    except Exception:
+        cur_cols, cur_lines = 80, 24
+
+    target_cols = max(cur_cols, min_cols)
+    target_lines = max(cur_lines, min_lines)
+
+    if target_cols <= cur_cols and target_lines <= cur_lines:
+        return cur_cols, cur_lines
+
+    # 1. Output ANSI escape code to stdout and /dev/tty
+    try:
+        sys.stdout.write(f"\033[8;{target_lines};{target_cols}t")
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+    try:
+        if os.path.exists("/dev/tty"):
+            with open("/dev/tty", "w") as tty:
+                tty.write(f"\033[8;{target_lines};{target_cols}t")
+                tty.flush()
+    except Exception:
+        pass
+
+    # 2. On macOS, actively resize Terminal.app or iTerm2 via AppleScript
+    if is_macos():
+        term_prog = os.environ.get("TERM_PROGRAM", "")
+        script = None
+        if term_prog == "Apple_Terminal" or not term_prog:
+            script = f'''
+            tell application "Terminal"
+                if (count of windows) > 0 then
+                    set w to front window
+                    if number of columns of w < {target_cols} then
+                        set number of columns of w to {target_cols}
+                    end if
+                    if number of rows of w < {target_lines} then
+                        set number of rows of w to {target_lines}
+                    end if
+                end if
+            end tell
+            '''
+        elif term_prog == "iTerm.app":
+            script = f'''
+            tell application "iTerm"
+                if (count of windows) > 0 then
+                    tell current session of current window
+                        if columns < {target_cols} then
+                            set columns to {target_cols}
+                        end if
+                        if rows < {target_lines} then
+                            set rows to {target_lines}
+                        end if
+                    end tell
+                end if
+            end tell
+            '''
+
+        if script:
+            try:
+                subprocess.run(
+                    ["osascript", "-e", script],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=0.6,
+                )
+            except Exception:
+                pass
+
+    try:
+        time.sleep(0.06)
+    except Exception:
+        pass
+
+    return target_cols, target_lines
 
 
 def is_macos() -> bool:
@@ -53,6 +150,7 @@ def build_terminal_script(
 
     script_lines = [
         "#!/usr/bin/env bash",
+        "printf '\\e[8;38;120t' 2>/dev/null || true",
         f"cd {escaped_cwd}",
         exec_cmd,
         "EC=$?",
@@ -107,6 +205,10 @@ def spawn_terminal_tui(
         f'tell application "Terminal"\n'
         f'    activate\n'
         f'    do script "{script_file}"\n'
+        f'    try\n'
+        f'        set number of columns of front window to 120\n'
+        f'        set number of rows of front window to 38\n'
+        f'    end try\n'
         f'end tell\n'
     )
 

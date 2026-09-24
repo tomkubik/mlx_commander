@@ -116,14 +116,17 @@ uv tool install mlx_commander
 MLX Commander features a 3-mode switcher (`F2` inside the TUI or via command-line flags):
 
 ```bash
-# 1. Launch directly into Mode 2 (Single Run)
-mlx_commander --lora
+# 1. Launch directly into Mode 2: Single Run (Default startup view)
+mlx_commander
 
-# 2. Launch directly into Mode 3 (Multi-Run Matrix)
+# Or explicitly via flag:
+mlx_commander --single-run
+
+# 2. Launch directly into Mode 3: Multi-Run Matrix (Hyperparameter Sweeps)
 mlx_commander --multi-run
 
-# 3. Launch directly into Mode 1: Dataset Converter (Default)
-mlx_commander
+# 3. Launch directly into Mode 1: Dataset Converter
+mlx_commander --converter
 
 # 4. Execute all queued runs sequentially in an external window:
 mlx_commander --run-queue ./mlx_runs
@@ -154,11 +157,13 @@ python3 -m mlx_commander --run-queue ./mlx_runs
 ---
 
 ## 🎛️ Mode 2: Single Run
-
-Press **`[F2]`** inside the TUI or pass `--lora` from the command line to enter **Single Run Mode**.
-
+ 
+Press **`[F2]`** inside the TUI or simply launch `mlx_commander` (default startup view) to enter **Single Run Mode**.
+ 
 ```bash
-mlx_commander --lora
+mlx_commander
+# Or explicitly:
+mlx_commander --single-run
 ```
 
 ### 1. Dual-Panel Setup
@@ -176,7 +181,11 @@ mlx_commander --lora
     - **`[TIGHT]`** (70–85% RAM): Viable, but approaching memory pressure limits.
     - **`[OOM RISK]`** (>85% RAM): Proactively warns before training begins and suggests enabling `grad_checkpoint` or reducing batch size.
   - **Implied Number of Epochs**: Calculated in real time via:
-    $$\text{Epochs} = \frac{\text{iters} \times \text{batch\_size} \times \text{gradient\_accumulation\_steps}}{\text{total\_train\_records}}$$
+
+    ```math
+    \text{Epochs} = \frac{\text{iters} \times \text{batch\_size} \times \text{gradient\_accumulation\_steps}}{\text{total\_train\_records}}
+    ```
+
     Highlighted in **dark red** if $< 1.0$ to alert you that the model will not observe the complete dataset.
   - **Wall-Clock Duration & Clock ETA**: Estimates execution duration and completion time based on your chip's compute throughput.
 
@@ -187,8 +196,13 @@ mlx_commander --lora
 When training multimodal models (such as Gemma 4, Qwen2-VL, PaliGemma, or SmolVLM) via `mlx-vlm`, micro-batch sizes greater than 1 trigger attention mask shape broadcasting errors due to unpadded multimodal token masks.
 
 MLX Commander automatically detects `mlx_vlm` models and applies mathematical equivalence:
-$$\text{batch\_size} \leftarrow 1$$
-$$\text{gradient\_accumulation\_steps} \leftarrow \text{batch\_size} \times \text{gradient\_accumulation\_steps}$$
+
+```math
+\begin{aligned}
+\text{batch\_size} &\leftarrow 1 \\
+\text{gradient\_accumulation\_steps} &\leftarrow \text{batch\_size} \times \text{gradient\_accumulation\_steps}
+\end{aligned}
+```
 
 This preserves identical effective batch size and gradient step dynamics while preventing runtime crashes:
 ```text
@@ -260,7 +274,10 @@ MLX Commander features a built-in **Generative Evaluation Engine** tagged as **`
 ### 1. Physics-Grounded Throughput Engine & Dynamic ETA
 
 Autoregressive token decoding is strictly memory-bandwidth bound:
-$$\text{Generation Speed (tok/s)} \approx \frac{\text{Unified Memory Bandwidth (GB/s)}}{\text{Active Model Weight Footprint (GB)}} \times 0.65$$
+
+```math
+\text{Generation Speed (tok/s)} \approx \frac{\text{Unified Memory Bandwidth (GB/s)}}{\text{Active Model Weight Footprint (GB)}} \times 0.65
+```
 
 Throughput scales inversely with model parameter count and precision:
 - **1B–3B 4-bit model** (~0.7–2.0 GB): **150–350 tok/s** (~35s for 50 samples).
@@ -347,7 +364,7 @@ models/Llama-3.2-3B/adapters/
 
 ## 🔄 Mode 1: Dataset Preparation & Ingestion
 
-Press **`[F2]`** to switch to **Dataset Converter Mode** (the default startup view).
+Press **`[F2]`** to switch to **Dataset Converter Mode** (or launch via `mlx_commander --converter`).
 
 ### 1. Supported MLX Formats
 1. **`prompt_completion`**: Q&A, instruction pairs, or query/code.
@@ -458,8 +475,9 @@ usage: mlx_commander [-h] [-v] [-d DATASET [DATASET ...]]
 
 | Flag | Category | Description |
 |---|---|---|
-| `--lora` | Mode Switcher | Launch directly into Mode 2 (Single Run). |
-| `--multi-run` | Mode Switcher | Launch directly into Mode 3 (Multi-Run Matrix). |
+| `--single-run`, `--lora` | Mode Switcher | Launch directly into Mode 2: Single Run (Default). |
+| `--multi-run` | Mode Switcher | Launch directly into Mode 3: Multi-Run Matrix. |
+| `--converter` | Mode Switcher | Launch directly into Mode 1: Dataset Converter. |
 | `--run-queue [DIR]` | Execution | Execute queued fine-tuning runs sequentially (default: `mlx_runs`). |
 | `-d`, `--dataset` | Data Ingestion | Path to dataset directory or file (`.parquet`, `.jsonl`, `.arrow`, `.csv`, `.sqlite`). |
 | `-f`, `--format` | Data Ingestion | Target format (`prompt_completion`, `chat`, `text`, `dpo`). |

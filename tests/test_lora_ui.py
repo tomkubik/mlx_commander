@@ -29,7 +29,7 @@ class TestLoraUI(unittest.TestCase):
     @patch("mlx_commander.tui.app.init_colors")
     @patch("mlx_commander.tui.app.curses.curs_set")
     def test_mode_switch_f2(self, mock_curs, mock_colors, mock_has_colors):
-        state = CommanderState()
+        state = CommanderState(active_tab=0)
         state.queue_manager = QueueManager(self.queue_dir)
 
         # Start in mode 0, press F2 (switches to mode 1), then 'q' to quit

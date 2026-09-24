@@ -360,7 +360,7 @@ class TestCommanderUI(unittest.TestCase):
         self.mock_win.getmaxyx.return_value = (30, 100)
         self.mock_win.getch.side_effect = [ord("q")]
 
-        run_commander_tui(self.mock_win)
+        run_commander_tui(self.mock_win, initial_state=CommanderState(active_tab=0))
         # Verify multi-file tip is drawn
         has_tip = any("Tip: You can load multiple files" in s for s in printed_strings)
         self.assertTrue(has_tip, "Multi-file loading tip was not found in TUI rendered output!")
@@ -417,7 +417,7 @@ class TestCommanderUI(unittest.TestCase):
         # Up moves back to first column (selected_column_idx = 0)
         # Up again moves back to Dataset field (left_focus_idx = 0)
         from mlx_commander.loader import LoadedDataset
-        state = CommanderState()
+        state = CommanderState(active_tab=0)
         state.loaded_dataset = LoadedDataset(
             source_path="mock.jsonl",
             is_split=False,
@@ -450,7 +450,7 @@ class TestCommanderUI(unittest.TestCase):
         # Enter selects format at index 1 -> target_format should become CHAT.
         # Right arrow moves down to index 2 (text).
         # Space selects format at index 2 -> target_format should become TEXT.
-        state = CommanderState()
+        state = CommanderState(active_tab=0)
         state.active_panel = ActivePanel.RIGHT
         state.right_focus_idx = 0
 
@@ -569,7 +569,7 @@ class TestCommanderUI(unittest.TestCase):
     @patch("mlx_commander.tui.app.curses.curs_set")
     def test_norton_bottom_bar_rendering(self, mock_curs, mock_colors, mock_has_colors):
         from mlx_commander.tui.state import ThemeMode
-        state = CommanderState()
+        state = CommanderState(active_tab=0)
         state.theme_mode = ThemeMode.NORTON
 
         self.mock_win.getch.side_effect = [ord("q")]
@@ -597,7 +597,7 @@ class TestCommanderUI(unittest.TestCase):
     @patch("mlx_commander.tui.app.curses.curs_set")
     def test_cross_tab_vertical_navigation(self, mock_curs, mock_colors, mock_has_colors):
         from mlx_commander.tui.state import ActivePanel
-        state = CommanderState()
+        state = CommanderState(active_tab=0)
         state.active_panel = ActivePanel.LEFT
         state.left_focus_idx = 0  # Unified Dataset field (no dataset loaded)
 
@@ -622,7 +622,7 @@ class TestCommanderUI(unittest.TestCase):
         for fmt in [MLXFormat.PROMPT_COMPLETION, MLXFormat.DPO, MLXFormat.TEXT, MLXFormat.CHAT]:
             self.mock_win.reset_mock()
             self.mock_win.getmaxyx.return_value = (24, 80)
-            state = CommanderState()
+            state = CommanderState(active_tab=0)
             state.target_format = fmt
             self.mock_win.getch.side_effect = [ord("q")]
 
@@ -682,7 +682,7 @@ class TestCommanderUI(unittest.TestCase):
         for term_w in [130, 100]:
             self.mock_win.reset_mock()
             self.mock_win.getmaxyx.return_value = (30, term_w)
-            state = CommanderState()
+            state = CommanderState(active_tab=0)
             self.mock_win.getch.side_effect = [ord("q")]
 
             run_commander_tui(self.mock_win, initial_state=state)
@@ -738,7 +738,7 @@ class TestCommanderUI(unittest.TestCase):
         right_w = term_w - left_w  # 60
         right_edge = left_w + right_w - 3  # 117
 
-        state = CommanderState()
+        state = CommanderState(active_tab=0)
         self.mock_win.getch.side_effect = [ord("q")]
 
         run_commander_tui(self.mock_win, initial_state=state)
@@ -847,7 +847,7 @@ class TestCommanderUI(unittest.TestCase):
         tab2_right_edge = left_w + right_w - 3  # 117
         tab1_right_edge = left_w - 3  # 57
 
-        state = CommanderState()
+        state = CommanderState(active_tab=0)
         self.mock_win.getch.side_effect = [ord("q")]
 
         run_commander_tui(self.mock_win, initial_state=state)
@@ -921,13 +921,13 @@ class TestCommanderUI(unittest.TestCase):
     @patch("mlx_commander.tui.app.init_colors")
     @patch("mlx_commander.tui.app.curses.curs_set")
     def test_initial_tui_no_dataset_empty_preview(self, mock_curs, mock_colors, mock_has_colors):
-        """Verify that starting MLX Commander without a dataset shows (No dataset selected) and no record content."""
+        """Verify that starting MLX Commander without a dataset in Mode 1 shows (No dataset selected)."""
         self.mock_win.reset_mock()
         self.mock_win.getmaxyx.return_value = (30, 100)
         self.mock_win.getch.side_effect = [ord("q")]
 
-        # Run without default_dataset_path and without initial_state (simulating python3 mlx_commander.py)
-        run_commander_tui(self.mock_win)
+        # Run with initial_state Mode 1
+        run_commander_tui(self.mock_win, initial_state=CommanderState(active_tab=0))
 
         all_rendered_text = []
         no_ds_found = False
@@ -1271,6 +1271,29 @@ class TestCommanderUI(unittest.TestCase):
         mock_choice.assert_called_once()
         self.assertEqual(state.mapping.prompt_col, "col_x")
         self.assertIn("Mapped column 'col_x'", state.status_message)
+
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_default_startup_mode_single_run(self, mock_curs, mock_colors, mock_has_colors):
+        state = CommanderState()
+        self.assertEqual(state.active_tab, 1, "Default active_tab must be 1 (Single Run)")
+        self.assertEqual(state.mode_switcher_idx, 1, "Default mode switcher index must be 1")
+        self.assertIn("Configure hyperparameters", state.status_message)
+
+        # Run TUI with default state, press 'q' immediately
+        self.mock_win.reset_mock()
+        self.mock_win.getmaxyx.return_value = (38, 120)
+        self.mock_win.getch.side_effect = [ord("q")]
+
+        run_commander_tui(self.mock_win, initial_state=state)
+
+        calls = self.mock_win.addstr.call_args_list
+        all_text = " ".join(c[0][2] for c in calls if len(c[0]) >= 3 and isinstance(c[0][2], str))
+        self.assertIn("2: Single Run", all_text)
+        self.assertIn("LoRA Hyperparameters", all_text)
+        self.assertIn("Runtime Estimates", all_text)
+        self.assertIn("Fine-Tuning Queue", all_text)
 
 
 if __name__ == "__main__":
