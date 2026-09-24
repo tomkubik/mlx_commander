@@ -490,8 +490,88 @@ def inspect_dataset_path(path_input: Union[str, Path, List[Union[str, Path]]]) -
     return True, f"Found {len(raw_paths)} files to merge."
 
 
+def robust_decode_bytes(raw_bytes: bytes) -> str:
+    """
+    Robustly decode byte sequences into text without corrupting encodings.
+
+    Guarantees:
+    1. Standard Unicode BOMs (UTF-8-SIG, UTF-16-LE, UTF-16-BE, UTF-32-LE, UTF-32-BE)
+       are accurately detected and decoded, stripping the BOM header.
+    2. UTF-16 / UTF-32 without BOM is ONLY attempted if the byte sequence exhibits
+       the characteristic high null-byte ratio (>= 15% null bytes in ASCII/Latin text).
+       Single-byte 8-bit encodings (like ISO-8859-1 or Windows-1252) never contain
+       null bytes in valid text, preventing them from being mistakenly decoded
+       by UTF-16 into CJK ideographs (Chinese characters).
+    3. Strict UTF-8 is probed next for valid modern UTF-8 text.
+    4. Windows-1252 (cp1252) is probed next, correctly decoding European text, currency symbols
+       (e.g., Euro €), curly quotes (“”), and dashes (–—).
+    5. ISO-8859-1 (latin-1) / ISO-8859-15 are probed if unassigned C1 control codes (0x80-0x9F)
+       are absent.
+    6. Lossless UTF-8 with replacement characters as final safe fallback.
+    """
+    if not raw_bytes:
+        return ""
+
+    # 1. BOM detection (standard Unicode Byte Order Marks)
+    if raw_bytes.startswith(b"\xef\xbb\xbf"):
+        return raw_bytes.decode("utf-8-sig")
+    if raw_bytes.startswith(b"\xff\xfe\x00\x00") or raw_bytes.startswith(b"\x00\x00\xfe\xff"):
+        return raw_bytes.decode("utf-32")
+    if raw_bytes.startswith(b"\xff\xfe") or raw_bytes.startswith(b"\xfe\xff"):
+        return raw_bytes.decode("utf-16")
+
+    # 2. Check for UTF-16 / UTF-32 without BOM
+    # In UTF-16/32 text, ASCII characters contain null bytes (0x00).
+    # Normal text in single-byte encodings (or UTF-8) contains essentially zero null bytes.
+    sample = raw_bytes[:8192]
+    null_ratio = sample.count(b"\x00") / len(sample)
+    if null_ratio >= 0.15:
+        even_nulls = sum(1 for i in range(0, len(sample), 2) if sample[i] == 0)
+        odd_nulls = sum(1 for i in range(1, len(sample), 2) if sample[i] == 0)
+        enc_candidates = ("utf-16-le", "utf-16-be") if odd_nulls >= even_nulls else ("utf-16-be", "utf-16-le")
+        for enc in enc_candidates + ("utf-32-le", "utf-32-be"):
+            try:
+                decoded = raw_bytes.decode(enc)
+                if "\x00" not in decoded:
+                    return decoded
+            except (UnicodeDecodeError, LookupError):
+                pass
+
+    # 3. Strict UTF-8 (universal modern standard)
+    try:
+        return raw_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+
+    # 4. Windows-1252 (superset of ISO-8859-1 with smart quotes, dashes, euro symbol)
+    try:
+        return raw_bytes.decode("cp1252")
+    except UnicodeDecodeError:
+        pass
+
+    # 5. Latin-1 (ISO-8859-1) / ISO-8859-15 check
+    try:
+        latin_candidate = raw_bytes.decode("latin-1")
+        # In genuine Latin-1 text, bytes 0x80-0x9F (unassigned C1 control codes) are virtually never used.
+        # If they are absent, latin-1 is cleanly valid.
+        c1_controls = sum(1 for c in latin_candidate[:4096] if 0x80 <= ord(c) <= 0x9F)
+        if c1_controls == 0:
+            return latin_candidate
+    except (UnicodeDecodeError, LookupError):
+        pass
+
+    for enc in ("iso-8859-15", "mac_roman"):
+        try:
+            return raw_bytes.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            pass
+
+    # 6. Safe fallback to UTF-8 with replacement
+    return raw_bytes.decode("utf-8", errors="replace")
+
+
 def load_from_json_or_jsonl(file_path: Path) -> List[Dict[str, Any]]:
-    """Load JSON lines or standard JSON array from file."""
+    """Load JSON lines or standard JSON array from file with robust encoding detection."""
     if is_parquet_file(file_path):
         return load_from_parquet_file(file_path)
     if is_arrow_file(file_path):
@@ -499,89 +579,124 @@ def load_from_json_or_jsonl(file_path: Path) -> List[Dict[str, Any]]:
 
     records: List[Dict[str, Any]] = []
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            # Check first non-whitespace char
-            pos = f.tell()
-            first_char = f.read(1)
-            while first_char and first_char.isspace():
-                first_char = f.read(1)
-            f.seek(pos)
+        raw_bytes = file_path.read_bytes()
+    except Exception as e:
+        raise ValueError(f"Could not read file '{file_path.name}': {e}")
 
-            if first_char == "[":
-                # JSON array
-                data = json.load(f)
-                if isinstance(data, list):
-                    records = [d for d in data if isinstance(d, dict)]
-            else:
-                # JSONL
-                for line in f:
-                    line_str = line.strip()
-                    if line_str:
-                        try:
-                            obj = json.loads(line_str)
-                            if isinstance(obj, dict):
-                                records.append(obj)
-                        except json.JSONDecodeError:
-                            continue
+    try:
+        decoded_text = robust_decode_bytes(raw_bytes)
+        stripped = decoded_text.strip()
+        if stripped.startswith("["):
+            # JSON array
+            data = json.loads(stripped)
+            if isinstance(data, list):
+                records = [d for d in data if isinstance(d, dict)]
+        else:
+            # JSONL
+            for line in decoded_text.splitlines():
+                line_str = line.strip()
+                if line_str:
+                    try:
+                        obj = json.loads(line_str)
+                        if isinstance(obj, dict):
+                            records.append(obj)
+                    except json.JSONDecodeError:
+                        continue
         return records
-    except UnicodeDecodeError as ue:
+    except Exception as ue:
         if is_parquet_file(file_path):
             return load_from_parquet_file(file_path)
         if is_arrow_file(file_path):
             return load_from_arrow_file(file_path)
         raise ValueError(
-            f"File '{file_path.name}' contains binary or non-UTF-8 data ({ue}) and cannot be loaded as JSON/JSONL."
+            f"File '{file_path.name}' contains invalid JSON or corrupted data ({ue}) and cannot be loaded as JSON/JSONL."
         )
 
 
 def load_from_csv(file_path: Path) -> List[Dict[str, Any]]:
-    """Load records from CSV file."""
+    """Load records from CSV file with robust encoding detection."""
     records: List[Dict[str, Any]] = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            records.append(dict(row))
+    decoded_text = robust_decode_bytes(file_path.read_bytes())
+    reader = csv.DictReader(io.StringIO(decoded_text))
+    for row in reader:
+        records.append(dict(row))
     return records
 
 
 def load_from_tsv(file_path: Path) -> List[Dict[str, Any]]:
-    """Load records from Tab-Separated Values (TSV) file."""
+    """Load records from Tab-Separated Values (TSV) file with robust encoding detection."""
     records: List[Dict[str, Any]] = []
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-        reader = csv.DictReader(f, delimiter="\t")
-        for row in reader:
-            records.append(dict(row))
+    decoded_text = robust_decode_bytes(file_path.read_bytes())
+    reader = csv.DictReader(io.StringIO(decoded_text), delimiter="\t")
+    for row in reader:
+        records.append(dict(row))
     return records
 
 
 def load_from_text(file_path: Path) -> List[Dict[str, Any]]:
     """
     Load records from a plain text file (.txt, .text).
-    Supports multiple encodings with automatic fallbacks:
-    1. utf-8-sig (detects and cleanly removes UTF-8 BOM)
-    2. utf-8
-    3. utf-16 (handles UTF-16-LE / UTF-16-BE with BOM)
-    4. latin-1 / cp1252 (fallback that never fails decoding)
+    Supports multiple encodings with robust automatic detection via robust_decode_bytes:
+    - UTF-8 with/without BOM
+    - UTF-16 / UTF-32 with/without BOM
+    - Windows-1252 / ISO-8859-1 / ISO-8859-15
 
-    Converts each non-empty line into a record: {"text": line}
+    Automatically detects labeled datasets where lines are separated by a delimiter
+    (e.g., '@', '\\t', '::', '||', '|') into prompt/completion pairs, while also
+    preserving the full 'text' field for pre-training or text format conversion.
     """
     raw_bytes = file_path.read_bytes()
-    decoded_text: Optional[str] = None
-    for enc in ("utf-8-sig", "utf-8", "utf-16", "latin-1"):
-        try:
-            decoded_text = raw_bytes.decode(enc)
-            break
-        except (UnicodeDecodeError, LookupError):
-            continue
+    decoded_text = robust_decode_bytes(raw_bytes)
 
-    if decoded_text is None:
-        decoded_text = raw_bytes.decode("utf-8", errors="replace")
+    lines = [line.strip() for line in decoded_text.splitlines() if line.strip()]
+    if not lines:
+        return []
+
+    sample_lines = lines[:100]
+    best_delim = None
+
+    for delim in ("@", "\t", "::", "||", "|"):
+        if delim == "@":
+            # For '@', ensure it's not email addresses (e.g. user@example.com)
+            is_email_file = any("@" in l and "." in l.split("@")[-1] and " " not in l for l in sample_lines)
+            if is_email_file:
+                continue
+
+        valid_count = 0
+        for l in sample_lines:
+            if delim in l:
+                p0, p1 = l.rsplit(delim, 1)
+                if p0.strip() and p1.strip():
+                    if delim == "@":
+                        # In labeled datasets with '@', label after '@' is typically short (< 80 chars, <= 6 words)
+                        if len(p1.strip()) < 80 and len(p1.strip().split()) <= 6:
+                            valid_count += 1
+                    else:
+                        valid_count += 1
+        if sample_lines and (valid_count / len(sample_lines) >= 0.80):
+            best_delim = delim
+            break
 
     records: List[Dict[str, Any]] = []
-    for line in decoded_text.splitlines():
-        cleaned = line.strip()
-        if cleaned:
-            records.append({"text": cleaned})
+    if best_delim:
+        for line in lines:
+            if best_delim in line:
+                p0, p1 = line.rsplit(best_delim, 1)
+                records.append({
+                    "prompt": p0.strip(),
+                    "completion": p1.strip(),
+                    "text": line,
+                })
+            else:
+                records.append({
+                    "prompt": line,
+                    "completion": "",
+                    "text": line,
+                })
+    else:
+        for line in lines:
+            records.append({"text": line})
+
     return records
 
 

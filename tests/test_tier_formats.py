@@ -135,6 +135,78 @@ class TestTierFormats(unittest.TestCase):
         self.assertEqual(state.target_format, MLXFormat.TEXT)
         self.assertEqual(state.mapping.text_col, "text")
 
+    def test_load_latin1_text_no_chinese_characters(self):
+        """
+        Verify that Latin-1 / ISO-8859-1 encoded text with European/Finnish characters
+        (such as Seppälä, Åland, etc.) does NOT get misdecoded as UTF-16 CJK ideographs
+        (Chinese characters), and that delimited lines like '@positive' are correctly parsed.
+        """
+        file_path = Path(self.temp_dir) / "financial_phrasebank.txt"
+        lines = [
+            "Clothing retail chain Seppälä 's sales increased by 8 % to EUR 155.2 mn .@positive",
+            "Finnish Bank of Åland reports its operating profit increased .@positive",
+            "According to Gran , the company has no plans to move all production to Russia .@neutral",
+            "Sales in Finland decreased by 10.5 % in January .@negative",
+        ]
+        content_latin1 = "\n".join(lines).encode("iso-8859-1")
+        file_path.write_bytes(content_latin1)
+
+        records = load_from_text(file_path)
+        self.assertEqual(len(records), 4)
+
+        # Verify no Chinese CJK characters anywhere in decoded records
+        for r in records:
+            for val in r.values():
+                self.assertFalse(any(0x4E00 <= ord(c) <= 0x9FFF for c in str(val)))
+
+        # Verify delimited record structure
+        self.assertIn("prompt", records[0])
+        self.assertIn("completion", records[0])
+        self.assertIn("text", records[0])
+        self.assertEqual(records[0]["completion"], "positive")
+        self.assertEqual(records[2]["completion"], "neutral")
+        self.assertEqual(records[3]["completion"], "negative")
+        self.assertIn("Seppälä", records[0]["prompt"])
+        self.assertIn("Åland", records[1]["prompt"])
+
+    def test_load_cp1252_smart_quotes_and_euro(self):
+        """Verify Windows-1252 specific characters (euro €, smart quotes “”, dashes –) decode cleanly."""
+        file_path = Path(self.temp_dir) / "cp1252_sample.txt"
+        text = '“Net sales rose to €150m – beating expectations!”@positive\n“Operating profit fell.”@negative'
+        file_path.write_bytes(text.encode("cp1252"))
+
+        records = load_from_text(file_path)
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[0]["completion"], "positive")
+        self.assertIn("€150m", records[0]["prompt"])
+        self.assertTrue(records[0]["prompt"].startswith("“"))
+
+    def test_load_utf16_without_bom(self):
+        """Verify UTF-16 without BOM (detected via high null-byte ratio) decodes properly."""
+        file_path = Path(self.temp_dir) / "utf16_no_bom.txt"
+        text = "First UTF-16 line without BOM.\nSecond line content."
+        file_path.write_bytes(text.encode("utf-16-le"))
+
+        records = load_from_text(file_path)
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[0]["text"], "First UTF-16 line without BOM.")
+        self.assertEqual(records[1]["text"], "Second line content.")
+
+    def test_load_tab_delimited_text_auto_detection(self):
+        """Verify text files with tab delimiters auto-detect prompt and completion."""
+        file_path = Path(self.temp_dir) / "tab_pairs.txt"
+        lines = [
+            "What is the capital of France?\tParis",
+            "What is the capital of Germany?\tBerlin",
+            "What is the capital of Italy?\tRome",
+        ]
+        file_path.write_text("\n".join(lines), encoding="utf-8")
+
+        records = load_from_text(file_path)
+        self.assertEqual(len(records), 3)
+        self.assertEqual(records[0]["prompt"], "What is the capital of France?")
+        self.assertEqual(records[0]["completion"], "Paris")
+
     # --- Missing Dependency Interstitial Tests ---
 
     def test_parquet_file_missing_pyarrow_raises_interstitial_error(self):
