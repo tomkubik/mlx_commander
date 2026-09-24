@@ -1404,7 +1404,7 @@ class TestCommanderUI(unittest.TestCase):
 
         # Run TUI with default state, press 'q' immediately
         self.mock_win.reset_mock()
-        self.mock_win.getmaxyx.return_value = (38, 120)
+        self.mock_win.getmaxyx.return_value = (45, 120)
         self.mock_win.getch.side_effect = [ord("q")]
 
         run_commander_tui(self.mock_win, initial_state=state)
@@ -1415,6 +1415,48 @@ class TestCommanderUI(unittest.TestCase):
         self.assertIn("LoRA Hyperparameters", all_text)
         self.assertIn("Runtime Estimates", all_text)
         self.assertIn("Fine-Tuning Queue", all_text)
+
+    @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
+    @patch("mlx_commander.tui.app.init_colors")
+    @patch("mlx_commander.tui.app.curses.curs_set")
+    def test_mode3_conditions_fully_visible_in_expanded_window(self, mock_curs, mock_colors, mock_has_colors):
+        """Mode 3 (Multi-Run Matrix): All 15 hyperparameter conditions are fully visible without scrolling."""
+        state = CommanderState()
+        state.active_tab = 2
+        state.mode_switcher_idx = 2
+
+        self.mock_win.reset_mock()
+        self.mock_win.getmaxyx.return_value = (45, 120)
+        self.mock_win.getch.side_effect = [ord("q")]
+
+        run_commander_tui(self.mock_win, initial_state=state)
+
+        calls = self.mock_win.addstr.call_args_list
+        all_text = " ".join(c[0][2] for c in calls if len(c[0]) >= 3 and isinstance(c[0][2], str))
+
+        # Check that Mode 3 is active
+        self.assertIn("3: Multi-Run Matrix", all_text)
+        self.assertIn("Step 2: Conditions", all_text)
+
+        # Check conditions in right panel are all rendered
+        self.assertIn("Training Iterations", all_text)
+        self.assertIn("Batch Size", all_text)
+        self.assertIn("Gradient Accumulation Steps", all_text)
+        self.assertIn("Learning Rate", all_text)
+        self.assertIn("LoRA Rank (r)", all_text)
+        self.assertIn("LoRA Alpha (α)", all_text)
+        self.assertIn("LoRA Dropout", all_text)
+        self.assertIn("Max Seq Length", all_text)
+        self.assertIn("Fine-Tuned Layers", all_text)
+        self.assertIn("Grad Checkpoint", all_text)
+        self.assertIn("Mask Prompt", all_text)
+        self.assertIn("Save Every", all_text)
+        self.assertIn('Steps per "Eval"', all_text)
+        self.assertIn("Run evals on test set", all_text)
+        self.assertIn("+ Add Sweep to Queue (F6)", all_text)
+
+        # Scroll offset must be 0 (no items scrolled out of view)
+        self.assertEqual(state.multi_right_scroll_offset, 0)
 
     @patch("mlx_commander.tui.app.curses.has_colors", return_value=True)
     @patch("mlx_commander.tui.app.init_colors")

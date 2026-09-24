@@ -839,7 +839,10 @@ def _draw_mode2_dashboard(
     # always displays the full list of 14 hyperparameters without scrolling.
     # Middle tier (Resource & Training Estimates): 5-6 rows.
     # Bottom tier (Fine-Tuning Queue): shrunk to save vertical space; supports full scrolling.
-    if max_y >= 30:
+    if max_y >= 35:
+        panel_h = 20
+        vis_h = 6
+    elif max_y >= 30:
         panel_h = 19
         vis_h = 6
     elif max_y >= 28:
@@ -975,10 +978,14 @@ def _draw_mode2_dashboard(
     ]
 
     # Handle smooth scrolling in single-column hyperparameter list
-    if state.lora_right_focus_idx < state.lora_right_scroll_offset:
+    if len(fields_def) <= inner_h:
+        state.lora_right_scroll_offset = 0
+    elif state.lora_right_focus_idx < state.lora_right_scroll_offset:
         state.lora_right_scroll_offset = state.lora_right_focus_idx
     elif state.lora_right_focus_idx >= state.lora_right_scroll_offset + inner_h:
         state.lora_right_scroll_offset = state.lora_right_focus_idx - inner_h + 1
+    elif state.lora_right_scroll_offset + inner_h > len(fields_def):
+        state.lora_right_scroll_offset = max(0, len(fields_def) - inner_h)
     scroll_off = state.lora_right_scroll_offset
 
     for idx_in_view in range(min(inner_h, len(fields_def) - scroll_off)):
@@ -1108,7 +1115,10 @@ def _draw_mode3_dashboard(
     right_w: int,
 ) -> None:
     """Draw Mode 3: Apple MLX LoRA Fine-Tuning Multi-Run Dashboard & Sweep Grid."""
-    if max_y >= 30:
+    if max_y >= 35:
+        panel_h = 20
+        vis_h = 6
+    elif max_y >= 30:
         panel_h = 19
         vis_h = 6
     elif max_y >= 28:
@@ -1241,11 +1251,15 @@ def _draw_mode3_dashboard(
         (14, "+ Add Sweep to Queue (F6)", [], None, True),
     ]
 
-    # Handle smooth scrolling in right panel
-    if state.multi_right_focus_idx < state.multi_right_scroll_offset:
+    # Handle smooth scrolling in right panel (conditions always visible when space permits)
+    if len(multi_fields_def) <= inner_h:
+        state.multi_right_scroll_offset = 0
+    elif state.multi_right_focus_idx < state.multi_right_scroll_offset:
         state.multi_right_scroll_offset = state.multi_right_focus_idx
     elif state.multi_right_focus_idx >= state.multi_right_scroll_offset + inner_h:
         state.multi_right_scroll_offset = state.multi_right_focus_idx - inner_h + 1
+    elif state.multi_right_scroll_offset + inner_h > len(multi_fields_def):
+        state.multi_right_scroll_offset = max(0, len(multi_fields_def) - inner_h)
     scroll_off = state.multi_right_scroll_offset
 
     for idx_in_view in range(min(inner_h, len(multi_fields_def) - scroll_off)):
@@ -2169,8 +2183,8 @@ def run_commander_tui(
 
     try:
         cur_y, cur_x = stdscr.getmaxyx()
-        if cur_y < 38 or cur_x < 120:
-            ensure_adequate_terminal_size(min_cols=120, min_lines=38)
+        if cur_y < 45 or cur_x < 120:
+            ensure_adequate_terminal_size(min_cols=120, min_lines=45)
     except Exception:
         pass
 
@@ -2180,7 +2194,7 @@ def run_commander_tui(
 
         # Check for minimum terminal dimension
         if max_y < 16 or max_x < 70:
-            ensure_adequate_terminal_size(min_cols=120, min_lines=38)
+            ensure_adequate_terminal_size(min_cols=120, min_lines=45)
             max_y, max_x = stdscr.getmaxyx()
             if max_y < 16 or max_x < 70:
                 safe_addstr(stdscr, 1, 2, "Terminal window too small for MLX Commander.", curses.A_BOLD)
@@ -2629,7 +2643,7 @@ def launch_tui(
     prefill: Optional[Dict[str, Any]] = None,
 ) -> Optional[ConversionResult]:
     """Launch the MLX Commander full-screen curses dashboard with optional prefill."""
-    ensure_adequate_terminal_size(min_cols=120, min_lines=38)
+    ensure_adequate_terminal_size(min_cols=120, min_lines=45)
     configure_escdelay(25)
     try:
         return curses.wrapper(run_commander_tui, default_dataset_path, initial_state, prefill)

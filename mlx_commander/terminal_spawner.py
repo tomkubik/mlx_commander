@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 
-def ensure_adequate_terminal_size(min_cols: int = 120, min_lines: int = 38) -> Tuple[int, int]:
+def ensure_adequate_terminal_size(min_cols: int = 120, min_lines: int = 45) -> Tuple[int, int]:
     """
     Ensure the terminal window is at least min_cols wide and min_lines tall so that
     all interface elements (hyperparameters, runtime estimates, and queued runs)
@@ -150,7 +150,7 @@ def build_terminal_script(
 
     script_lines = [
         "#!/usr/bin/env bash",
-        "printf '\\e[8;38;120t' 2>/dev/null || true",
+        "printf '\\e[8;45;120t' 2>/dev/null || true",
         f"cd {escaped_cwd}",
         exec_cmd,
         "EC=$?",
@@ -207,7 +207,7 @@ def spawn_terminal_tui(
         f'    do script "{script_file}"\n'
         f'    try\n'
         f'        set number of columns of front window to 120\n'
-        f'        set number of rows of front window to 38\n'
+        f'        set number of rows of front window to 45\n'
         f'    end try\n'
         f'end tell\n'
     )
