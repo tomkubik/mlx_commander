@@ -30,8 +30,8 @@ MLX Commander provides three dedicated operational modes accessible via TUI (`F2
 | Mode | Purpose | Key Capabilities |
 |---|---|---|
 | **Mode 1: Dataset Converter** | Ingest & standardize data | Schema auto-detection, multi-column concat (`+`), multi-file merging, 4 target MLX formats, reproducible seeds, manifest handshake. |
-| **Mode 2: Fine-Tuning Single Run** | Configure & execute 1 job | 22+ explicit hyperparameters, VLM attention mask safeguards (`batch_size=1`, `grad_accum=N`), peak RAM & implied epochs estimation, validation loss milestones. |
-| **Mode 3: Fine-Tuning Multi-Run** | Grid sweeps & batch queue | Single-line multi-condition syntax, Cartesian product grid expansion ($N_1 \times N_2 \dots$), sequential FIFO execution to prevent memory thrashing. |
+| **Mode 2: Solo Runs** | Precision single-run tuning | 22+ explicit hyperparameters, VLM attention mask safeguards (`batch_size=1`, `grad_accum=N`), peak RAM & implied epochs estimation, validation loss milestones. |
+| **Mode 3: Fleet Sweeps** | Multi-run grid sweeps & queue | Single-line multi-condition syntax, Cartesian product grid expansion ($N_1 \times N_2 \dots$), sequential FIFO execution to prevent memory thrashing. |
 | **Evals: Test Set Generator** | Generative evaluation | Real token-by-token decoding on `test.jsonl`, physical memory-bandwidth speed model, Exact Match, Word F1, 2×2 Migration Matrix, offline HTML comparison dashboard, W&B tables. |
 
 ---
@@ -103,7 +103,7 @@ mlx_commander --tui --spawn-terminal \
 
 ---
 
-### 2. Single-Run Fine-Tuning Orchestration (Mode 2)
+### 2. Solo Runs: Single-Run Fine-Tuning Orchestration (Mode 2)
 
 #### Explicit Hyperparameters:
 MLX Commander makes all 22 fine-tuning hyperparameters explicit with robust Apple Silicon defaults:
@@ -157,7 +157,7 @@ When `valid.jsonl` is present in the dataset directory, MLX Commander automatica
 
 ---
 
-### 3. Multi-Run Orchestration & Hyperparameter Sweeps (Mode 3)
+### 3. Fleet Sweeps: Multi-Run Grid Sweeps & Queue Orchestration (Mode 3)
 
 Mode 3 expands multi-condition sweeps into a visual Cartesian product grid and queues runs into a persistent FIFO queue (`mlx_runs/queue.json`).
 

@@ -10,52 +10,79 @@ Built entirely in Python with zero mandatory dependencies and zero pre-compiled 
 
 ---
 
-## 🌟 Key Capabilities at a Glance
+## ⚡ Punchy Overview: Key Features
 
-- **Fine-Tuning Single Run Orchestration (Mode 2)**:
-  - Configure all 22 MLX fine-tuning parameters with explicit production defaults: `iters`, `batch_size`, `gradient_accumulation_steps`, `learning_rate`, `lora_rank`, `lora_alpha`, `lora_dropout`, `max_seq_length`, `grad_checkpoint`, `mask_prompt`, `num_layers`, `save_every`, and `steps_per_eval`.
-  - Supports both Causal LLMs (`mlx-lm`) and Vision-Language / Multimodal models (`mlx-vlm` like Gemma 4, Qwen2-VL, PaliGemma, SmolVLM).
-  - **Automatic VLM Attention Mask Safeguards**: Detects multimodal models and auto-adjusts micro-`batch_size=1` and `gradient_accumulation_steps=N` to eliminate attention mask shape broadcast crashes.
-  - **Live Validation Loss Milestones**: Discovers `valid.jsonl` and evaluates validation loss at regular intervals, highlighting milestones in the terminal (`★ [Validation Loss Milestone] Iter 100: Val loss = 1.234`).
-  - **Analytical Unified Memory (RAM) Estimator**: Real-time calculation of peak RAM with `[SAFE]`, `[TIGHT]`, and `[OOM RISK]` safety ratings based on your exact Apple Silicon chip.
-  - **Implied Epochs Calculation**: Automatically computes `(iters * batch_size * grad_accumulation_steps) / train_records` with dark red alerts when $< 1.0$.
-  - **Deterministic Checkpoint Naming**: Adapters are automatically saved with complete hyperparameter signatures:
-    `0000400_adapters_lora_r16_a32_lr1e-5_b4_i1000_Llama-3.2-3B-Instruct-4bit.safetensors`.
+MLX Commander transforms your Apple Silicon Mac into an autonomous, crash-proof fine-tuning command center:
 
-- **Fine-Tuning Multi-Run Sweeps & Queue Orchestration (Mode 3)**:
-  - **Single-Line Multi-Value Fields**: Configure multiple sweep conditions on a single line (e.g. `Learning Rate: [ 1e-4 ] [ 2e-4 ]`, `LoRA Rank: [ 8 ] [ 16 ]`).
-  - **Visual Cartesian Sweep Grid**: Renders an interactive bottom panel displaying parameter columns, vertically stacked conditions, centered `✖` multiplication symbols, and total scheduled run count ($N_1 \times N_2 \dots$).
-  - **Sequential FIFO Queue Execution (`mlx_commander --run-queue`)**: Strictly enforces sequential execution to protect Unified Memory from thrashing, swap exhaustion, and macOS `SIGKILL` kernel panics.
-  - **Run Management**: Add (`F6`), clone (`c`), delete (`d`), clear (`x`), or load (`Enter`) runs to tweak parameters on the fly.
+```text
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                                 MLX COMMANDER WORKFLOW                                  │
+├──────────────────────────┬─────────────────────────────────┬───────────────────────────┤
+│  1. DATASET CONVERSION   │  2. RUN ORCHESTRATION           │  3. GENERATIVE EVALS      │
+│     (Hugging Face → MLX) │     (Solo Runs & Fleet Sweeps)  │     (Real Token Inference)│
+│  • Parquet / Arrow / Hub │  • 🎯 Solo Runs (22 parameters) │  • 2-Pass Test Bench      │
+│  • Auto Train/Val/Test   │  • 🚀 Fleet Sweeps (Cartesian)  │  • Bandwidth-based ETA    │
+│  • 4 Standard Formats    │  • FIFO Queue (Zero OOM Panics) │  • Exact Match & Word F1  │
+│  • Concat (+) & Merging  │  • VLM Attention-Mask Shield    │  • Offline HTML Dashboard │
+└──────────────────────────┴─────────────────────────────────┴───────────────────────────┘
+```
 
-- **Generative Test Set Evaluation Engine (experimental)**:
-  - Evaluates real token-by-token generation on `test.jsonl` deterministically (unlike standard `mlx_lm.lora --test` which only measures teacher-forced perplexity).
-  - **Physics-Grounded Throughput Engine**: Computes model-dependent generation throughput ($\text{tok/s} \propto \frac{\text{Memory Bandwidth}}{\text{Model Active Weights}}$) scaling inversely with model parameter count ($1\text{B} > 3\text{B} > 8\text{B} > 70\text{B}$) and precision (4-bit vs fp16).
-  - **Live Milestone & Dynamic ETA**: Real-time `\r` terminal progress updates (`Sample 25/50 (50%) | 148.4 tok/s | ETA: 18s`) with continuous cursor movement.
-  - **Deterministic Metrics**: Exact Match (Strict & SQuAD-normalized), Substring Contains, and Word-Level F1 (Precision & Recall).
-  - **Matrix of Wrong Answers**: Categorical Confusion Matrix & 2×2 Model Migration / Regression Matrix (`FIXED`, `REGRESSED`, `PRESERVED`, `PERSISTENT_FAIL`).
-  - **3-Tier Storage Artifacts**: Master `eval_leaderboard.csv` (opens in Apple Numbers/Excel), per-run `eval_summary.json` & `eval_predictions.jsonl`, and standalone zero-dependency offline `eval_comparison.html` dashboard.
-  - **Weights & Biases (W&B) Logging**: Streams training loss and uploads interactive test prediction tables (`wandb.Table`) with prompt diffs and confusion heatmaps.
+### 🎛️ 1. Fine-Tuning Flight Deck: Solo Runs & Fleet Sweeps
+*(Configuration & Orchestration of Single Runs and Multi-Run Hyperparameter Sweeps)*
 
-- **Dataset Preparation & Standardization (Mode 1)**:
-  - Converts Hugging Face datasets into 4 standardized Apple MLX formats:
-    1. **`prompt_completion`**: `{"prompt": "...", "completion": "..."}` (`mlx_lm.lora --mask-prompt` compatible).
-    2. **`chat`**: `{"messages": [{"role": "system|user|assistant", "content": "..."}]}` (multi-turn instruction tuning).
-    3. **`text`**: `{"text": "..."}` (causal LM / continued pre-training).
-    4. **`dpo`**: `{"prompt": "...", "chosen": "...", "rejected": "..."}` (Direct Preference Optimization).
-  - Multi-column concatenation (`+`) with user ordering (e.g. `instruction + input`).
-  - Multi-file selection and dataset merging with reproducible random seeds.
-  - Live reactive preview of formatted JSONL records.
-  - Machine-readable manifest handshake (`mlx_manifest.json`).
-  - Supports Parquet, Arrow, Hugging Face `save_to_disk`, JSONL, JSON, CSV, TSV, SQLite, and WebDataset.
+- **🎯 Solo Runs (Precision Single-Run Tuning — Mode 2)**:
+  - **Zero-Guesswork Parameter Matrix**: Explicit configuration of all 22 MLX fine-tuning hyperparameters (`learning_rate`, `batch_size`, `gradient_accumulation_steps`, `lora_rank`, `max_seq_length`, etc.) with tested production defaults.
+  - **Crash-Proof VLM Safeguards**: Automatically detects Vision-Language models (`mlx-vlm` like Gemma 4, Qwen2-VL, PaliGemma) and enforces `batch_size=1` with equivalent gradient accumulation steps—permanently preventing attention mask shape broadcast crashes.
+  - **Pre-Flight Memory Estimator**: Analytical calculation of peak Unified Memory (RAM) with real-time `[SAFE]`, `[TIGHT]`, and `[OOM RISK]` safety bands for your exact M-series chip.
+  - **Live Validation Milestones**: Discovers `valid.jsonl` and streams validation loss checkpoints directly to the terminal (`★ [Validation Loss Milestone] Iter 100: Val loss = 1.234`).
+  - **Implied Epochs Meter**: Computes dataset coverage with dark red warnings when $< 1.0$ epochs.
 
-- **Modern AI Agent & MCP Integration**:
-  - Full Model Context Protocol (MCP) server over `stdio` for Claude Desktop, Cursor, Antigravity, and Zed.
-  - Native macOS Cocoa Finder file pickers and external macOS `Terminal.app` spawner.
+- **🚀 Fleet Sweeps (Multi-Run Grid Search & Queue — Mode 3)**:
+  - **Visual Cartesian Parameter Grid**: Test hyperparameter permutations without writing brittle bash loops. Enter single-line conditions (`Learning Rate: [ 1e-4 ] [ 2e-4 ]`, `LoRA Rank: [ 8 ] [ 16 ]`) to instantly generate an interactive $N_1 \times N_2 \dots$ sweep matrix.
+  - **Crash-Proof Sequential Queue (`--run-queue`)**: Protects Apple Silicon Unified Memory from OOM thrashing, swap exhaustion, and macOS kernel panics by strictly executing queued runs in sequential FIFO order.
+  - **Detached Execution**: Spawns jobs in a separate macOS `Terminal.app` window so you can close the TUI or step away while runs execute.
 
-![Inspired by Norton Commander, with a classic color scheme available in TUI](docs/images/screenshot2.png)
+---
 
-*Inspired by Norton Commander, with high-contrast, productive keybindings*
+### 🧪 2. Experimental Generative Test Set Evals
+*(Real Token Generation & Regression Benchmarking)*
+
+- **Real Decoding (Not Just Perplexity)**: Prompts the trained model token-by-token on `test.jsonl` against baseline zero-shot completions.
+- **Physics-Grounded Throughput Engine**: Calibrates evaluation tokens/second and ETA based on model parameter count, quantization, and Apple Silicon memory bandwidth ($\text{tok/s} \propto \frac{\text{Memory Bandwidth}}{\text{Model Active Weights}}$).
+- **Comprehensive Accuracy Metrics**: Exact Match, Substring Contains, and Word-Level F1 (Precision & Recall).
+- **3-Tier Storage Artifacts**: Appends to a master `eval_leaderboard.csv` (opens in Apple Numbers/Excel), outputs per-run JSON/JSONL predictions, and compiles an offline, zero-dependency `eval_comparison.html` dashboard with interactive regression filters (`[ ⚠️ Regressed Only ]`, `[ ❇️ Fixed Only ]`).
+- **Weights & Biases (W&B) Integration**: Streams training curves and uploads interactive prompt diff tables.
+
+---
+
+### 🔄 3. Dataset Conversion & Standardization for MLX
+*(Hugging Face to Apple MLX in Seconds — Mode 1)*
+
+- **Turn Any Dataset into MLX Formats**: Ingests Hugging Face repositories or local files (Parquet, Arrow, JSONL, CSV, TSV, SQLite, WebDataset) and formats them into:
+  1. **`prompt_completion`** (`{"prompt": "...", "completion": "..."}`) — fully compatible with `mlx_lm.lora --mask-prompt`.
+  2. **`chat`** (`{"messages": [{"role": "...", "content": "..."}]}`) — multi-turn instruction tuning.
+  3. **`text`** (`{"text": "..."}`) — causal language modeling and continued pre-training.
+  4. **`dpo`** (`{"prompt": "...", "chosen": "...", "rejected": "..."}`) — Direct Preference Optimization.
+- **Smart Data Transformation**: Multi-column concatenation (`+`) with ordering (e.g. `instruction + input`), multi-file merging, and reproducible deterministic train/val/test splits (`--train 80 --valid 10 --test 10`).
+- **Machine-Readable Handshake**: Emits `mlx_manifest.json` with dataset metadata, record counts, and copy-paste CLI commands.
+- **Zero Mandatory Dependencies**: Built with Python standard library; handles streaming JSONL and CSV natively out of the box.
+
+---
+
+### 🤖 4. AI Agent & MCP Integration
+- **Full Model Context Protocol (MCP) Server**: 8 dedicated tools and prompts for **Antigravity**, **Claude Desktop**, **Cursor**, and **Zed** to inspect datasets, calculate memory safety, queue sweep grids, and trigger evaluations autonomously.
+
+---
+
+### 📋 Feature Matrix
+
+| Capability | Feature Name | What It Does | Why It Matters on Apple Silicon |
+|---|---|---|---|
+| **Single Run Tuning** | **🎯 Solo Runs (Mode 2)** | 22 explicit MLX parameters, live validation milestones, implied epochs | Eliminates guesswork; pre-flight RAM estimator prevents OOM crashes; VLM safeguards prevent attention mask errors. |
+| **Grid Search Sweeps** | **🚀 Fleet Sweeps (Mode 3)** | Visual Cartesian grid ($N_1 \times N_2 \dots$), single-line conditions, FIFO queue | Sequential execution prevents Unified Memory thrashing, disk swap freezing, and macOS kernel panics. |
+| **Evaluation Engine** | **🧪 Generative Evals** | Real token decoding on `test.jsonl`, baseline comparison, 3-tier reports | Unlike perplexity, tests actual generative capability; physics-grounded speed model predicts exact duration. |
+| **Data Ingestion** | **🔄 MLX Dataset Prep (Mode 1)** | Converts Parquet/Arrow/JSONL/Hub to 4 MLX formats with auto-splits | Instant formatting with multi-column concat (`+`), reproducible seeds, and zero mandatory external libraries. |
+| **Autonomous Control** | **🤖 MCP Server** | 8 native tools for AI coding agents over stdio | Agents can evaluate RAM, configure sweeps, and run training queues without manual UI clicking. |
 
 ---
 
@@ -88,13 +115,13 @@ uv tool install mlx_commander
 MLX Commander features a 3-mode switcher (`F2` inside the TUI or via command-line flags):
 
 ```bash
-# 1. Launch directly into Mode 2: Fine-Tuning Single Run
+# 1. Launch directly into Solo Runs (Mode 2: Single-Run Fine-Tuning)
 mlx_commander --lora
 
-# 2. Launch directly into Mode 3: Fine-Tuning Multi-Run (Hyperparameter Sweeps)
+# 2. Launch directly into Fleet Sweeps (Mode 3: Multi-Run Grid Sweeps)
 mlx_commander --multi-run
 
-# 3. Launch directly into Mode 1: Dataset Converter (Default)
+# 3. Launch directly into Dataset Converter (Mode 1: Default)
 mlx_commander
 
 # 4. Execute all queued runs sequentially in an external window:
@@ -125,9 +152,9 @@ python3 -m mlx_commander --run-queue ./mlx_runs
 
 ---
 
-## 🎛️ Mode 2: Fine-Tuning Single Run Orchestration
+## 🎛️ Mode 2: Solo Runs (Single-Run Fine-Tuning)
 
-Press **`[F2]`** inside the TUI or pass `--lora` from the command line to enter **Fine-Tuning Single Run Mode**.
+Press **`[F2]`** inside the TUI or pass `--lora` from the command line to enter **Solo Runs Mode**.
 
 ```bash
 mlx_commander --lora
@@ -179,9 +206,9 @@ When `valid.jsonl` is present in the dataset folder, MLX Commander automatically
 
 ---
 
-## 🎛️ Mode 3: Fine-Tuning Multi-Run (Hyperparameter Sweeps)
+## 🚀 Mode 3: Fleet Sweeps (Multi-Run Grid Sweeps & Queue)
 
-Press **`[F2]`** inside the TUI or pass `--multi-run` from the command line to switch to **Fine-Tuning Multi-Run Mode**.
+Press **`[F2]`** inside the TUI or pass `--multi-run` from the command line to switch to **Fleet Sweeps Mode**.
 
 ```bash
 mlx_commander --multi-run
