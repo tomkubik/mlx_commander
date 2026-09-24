@@ -6,8 +6,9 @@ on:
       - main
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   build-and-publish:
@@ -41,6 +42,19 @@ jobs:
           uv build
 
       - name: Publish to PyPI
+        id: pypi-publish
+        uses: pypa/gh-action-pypi-publish@release/v1
+        continue-on-error: true
+        with:
+          skip-existing: true
+
+      - name: Wait before retry (if GitHub OIDC/network encountered transient 503)
+        if: steps.pypi-publish.outcome == 'failure'
+        run: sleep 10
+
+      - name: Retry Publish to PyPI
+        if: steps.pypi-publish.outcome == 'failure'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
+
