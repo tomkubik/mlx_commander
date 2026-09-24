@@ -616,12 +616,13 @@ class TestLoraUI(unittest.TestCase):
         self.assertEqual(state.lora_left_focus_idx, 0, "DOWN from bottom of queue pane must wrap to top row (0) of selector pane")
 
 
+    @patch("mlx_commander.tui.app.is_macos", return_value=True)
     @patch("mlx_commander.tui.app.spawn_lora_queue_terminal", return_value=True)
     @patch("mlx_commander.tui.app.show_message_dialog")
     @patch("mlx_commander.tui.app.curses.has_colors", return_value=False)
     @patch("mlx_commander.tui.app.init_colors")
     @patch("mlx_commander.tui.app.curses.curs_set")
-    def test_f5_runs_immediately_without_f6(self, mock_curs, mock_colors, mock_has_colors, mock_dialog, mock_spawn):
+    def test_f5_runs_immediately_without_f6(self, mock_curs, mock_colors, mock_has_colors, mock_dialog, mock_spawn, mock_macos):
         """Verify that pressing F5 in Mode 2 immediately runs current config without needing F6 first."""
         state = CommanderState()
         state.active_tab = 1
@@ -642,12 +643,13 @@ class TestLoraUI(unittest.TestCase):
         self.assertEqual(state.queue_manager.runs[0].model, "mlx-community/Llama-3.2-3B-Instruct-4bit")
         mock_spawn.assert_called_once()
 
+    @patch("mlx_commander.tui.app.is_macos", return_value=True)
     @patch("mlx_commander.tui.app.spawn_lora_queue_terminal", return_value=True)
     @patch("mlx_commander.tui.app.show_message_dialog")
     @patch("mlx_commander.tui.app.curses.has_colors", return_value=False)
     @patch("mlx_commander.tui.app.init_colors")
     @patch("mlx_commander.tui.app.curses.curs_set")
-    def test_f6_schedule_then_f5_run_preserved(self, mock_curs, mock_colors, mock_has_colors, mock_dialog, mock_spawn):
+    def test_f6_schedule_then_f5_run_preserved(self, mock_curs, mock_colors, mock_has_colors, mock_dialog, mock_spawn, mock_macos):
         """Verify that scheduling with F6 and running later with F5 is fully preserved without duplicating runs."""
         state = CommanderState()
         state.active_tab = 1
@@ -667,12 +669,13 @@ class TestLoraUI(unittest.TestCase):
         self.assertEqual(len(state.queue_manager.runs), 1)
         mock_spawn.assert_called_once()
 
+    @patch("mlx_commander.tui.app.is_macos", return_value=True)
     @patch("mlx_commander.tui.app.spawn_lora_queue_terminal", return_value=True)
     @patch("mlx_commander.tui.app.show_message_dialog")
     @patch("mlx_commander.tui.app.curses.has_colors", return_value=False)
     @patch("mlx_commander.tui.app.init_colors")
     @patch("mlx_commander.tui.app.curses.curs_set")
-    def test_f5_runs_current_config_when_previous_runs_completed(self, mock_curs, mock_colors, mock_has_colors, mock_dialog, mock_spawn):
+    def test_f5_runs_current_config_when_previous_runs_completed(self, mock_curs, mock_colors, mock_has_colors, mock_dialog, mock_spawn, mock_macos):
         """Verify that if all existing runs in queue are completed, F5 enqueues and runs the current config."""
         state = CommanderState()
         state.active_tab = 1
