@@ -1,113 +1,411 @@
 # MLX_Commander 🚀
 
-A fast, persistent dual-panel TUI (Norton Commander style) & CLI converter for preparing Hugging Face datasets into Apple Silicon MLX fine-tuning formats (`mlx-lm`).
+The Norton Commander-style TUI, Headless CLI & Model Context Protocol (MCP) Orchestrator for Apple Silicon MLX Fine-Tuning Runs (Single Runs & Multi-Run Sweeps) and Hugging Face Dataset Preparation.
 
-Built entirely with Python's standard library `curses` with zero mandatory dependencies and zero pre-compiled binaries.
+Built entirely in Python with zero mandatory dependencies and zero pre-compiled binaries.
 
 ![Orthodox TUI which makes MLX defaults explicit](docs/images/screenshot1.png)
 
-*Orthodox TUI which makes MLX defaults explicit*
+*Orthodox dual-panel TUI which makes Apple MLX hyperparameters and hardware defaults explicit*
 
 ---
 
-## 🌟 Key Features
+## 🌟 Key Capabilities at a Glance
 
-- **Persistent Multi-Panel TUI (Norton Commander style)**: Full keyboard navigation (`Tab` to switch panels, `↑`/`↓` to navigate, `Enter` to edit/open dropdowns, `F5` to convert).
-- **AI Agent Skill & TUI Pre-Population**: Coding agents (Antigravity, Claude, Cursor) can inspect dataset schemas, pre-populate format, column mappings, and splits, and launch the TUI for split-second visual confirmation.
-- **macOS Terminal.app Spawner**: Seamless handoff from non-interactive agent environments to an interactive TUI window via AppleScript.
-- **Model Context Protocol (MCP) Server**: Native stdio MCP server exposing dataset inspection, TUI launching, and headless conversions to Claude Desktop and Cursor.
-- **Machine-Readable Manifest (`mlx_manifest.json`)**: Emits structured output with file paths, row counts, and copy-paste `mlx_lm.lora` commands for automated downstream pipelines.
-- **Multi-File Selection & Dataset Merging**: Select multiple dataset files at once (e.g. combining pre-split `train.jsonl` and `test.jsonl`). Verifies that all files have identical column schemas and merges them so you can randomize fresh Train / Validation / Test sets from scratch with a custom seed.
-- **Multi-Column Concatenation**: Tap `Space` to multi-select and order columns from the original dataset (e.g. `instruction + input`) to concatenate them seamlessly with `\n\n`.
-- **Live Reactive Preview**: Sample records format in real time as you change target formats or adjust column mappings.
-- **Instantaneous ESC Response**: Curses escape delay configured to 25ms (< 1 frame), making modal dismissal instantaneous while preserving arrow and function keys.
-- **Native macOS Cocoa Finder Picker**: Seamlessly select dataset folders or files via native macOS dialogs (compiled on the fly in `/tmp` with zero checked-in binaries).
-- **Supported MLX Formats**:
-  1. **Text Format**: `{"text": "..."}` — Causal LM / pre-training (single column, concatenated columns, or custom template).
-  2. **Chat / Messages Format**: `{"messages": [{"role": "system|user|assistant", "content": "..."}]}` — Supports message lists (standard role/content or ShareGPT `from`/`value`), or separate role columns.
-  3. **Prompt & Completion Format**: `{"prompt": "...", "completion": "..."}` — Q&A / instruction fine-tuning (`mlx_lm.lora --mask-prompt` compatible).
-  4. **DPO / Preference Format**: `{"prompt": "...", "chosen": "...", "rejected": "..."}` — Direct Preference Optimization.
-- **3-Mode Switcher Navigation (`F2`)**: Instant cycling between `[ 1: Dataset Converter ]`, `[ 2: Fine-Tuning Single Run ]`, and `[ 3: Fine-Tuning Multi-Run ]`.
-- **Mode 3: Fine-Tuning Multi-Run (Hyperparameter Sweeps)**: Configure multiple conditions per hyperparameter on a single line with clickable rightmost targets, review a visual Cartesian product grid (`✖` layout), and schedule batch queues.
-- **Unified RAM Safety & Implied Epochs Estimator**: Real-time calculation of peak unified RAM (with `[SAFE]`, `[TIGHT]`, `[OOM RISK]` ratings) and implied epochs (with warning alerts when $< 1.0$).
-- **Generative Test Set Evaluation Engine (experimental)**: Evaluates real model inferences on `test.jsonl` deterministically—measuring Exact Match, Substring Match, Word-Level F1 (Precision & Recall), Categorical Confusion Matrices, and 2×2 Model Migration & Regression Matrices.
-- **3-Tier Storage & Offline Dashboard**: Appends to `eval_leaderboard.csv` (opens in Numbers/Excel), outputs per-run JSON/JSONL artifacts, and renders an interactive offline `eval_comparison.html` dashboard with regression filters and text diffs.
-- **Weights & Biases (W&B) Logging**: Streams training loss and logs interactive evaluation prediction tables (`wandb.Table`) and confusion heatmaps (`wandb.plot.confusion_matrix`).
-- **Flexible Data Loader**: Parquet (`.parquet`), Arrow (`.arrow`), Hugging Face `save_to_disk` directories, JSONL (`.jsonl`), JSON arrays (`.json`), CSV (`.csv`), TSV (`.tsv`), SQLite (`.sqlite`, `.db`), and WebDataset (`.tar`).
-- **Deterministic Splits & Random Seed**: Customizable Train / Validation / Test percentages with 100% reproducible shuffling via random seed.
-- **Ready-to-Use `mlx_lm.lora` Command**: Generates the exact training command ready to copy-paste.
-- **CLI Wizard & Headless Modes**: Run line-by-line via `--wizard` or fully automated via headless CLI flags.
+- **Fine-Tuning Single Run Orchestration (Mode 2)**:
+  - Configure all 22 MLX fine-tuning parameters with explicit production defaults: `iters`, `batch_size`, `gradient_accumulation_steps`, `learning_rate`, `lora_rank`, `lora_alpha`, `lora_dropout`, `max_seq_length`, `grad_checkpoint`, `mask_prompt`, `num_layers`, `save_every`, and `steps_per_eval`.
+  - Supports both Causal LLMs (`mlx-lm`) and Vision-Language / Multimodal models (`mlx-vlm` like Gemma 4, Qwen2-VL, PaliGemma, SmolVLM).
+  - **Automatic VLM Attention Mask Safeguards**: Detects multimodal models and auto-adjusts micro-`batch_size=1` and `gradient_accumulation_steps=N` to eliminate attention mask shape broadcast crashes.
+  - **Live Validation Loss Milestones**: Discovers `valid.jsonl` and evaluates validation loss at regular intervals, highlighting milestones in the terminal (`★ [Validation Loss Milestone] Iter 100: Val loss = 1.234`).
+  - **Analytical Unified Memory (RAM) Estimator**: Real-time calculation of peak RAM with `[SAFE]`, `[TIGHT]`, and `[OOM RISK]` safety ratings based on your exact Apple Silicon chip.
+  - **Implied Epochs Calculation**: Automatically computes `(iters * batch_size * grad_accumulation_steps) / train_records` with dark red alerts when $< 1.0$.
+  - **Deterministic Checkpoint Naming**: Adapters are automatically saved with complete hyperparameter signatures:
+    `0000400_adapters_lora_r16_a32_lr1e-5_b4_i1000_Llama-3.2-3B-Instruct-4bit.safetensors`.
+
+- **Fine-Tuning Multi-Run Sweeps & Queue Orchestration (Mode 3)**:
+  - **Single-Line Multi-Value Fields**: Configure multiple sweep conditions on a single line (e.g. `Learning Rate: [ 1e-4 ] [ 2e-4 ]`, `LoRA Rank: [ 8 ] [ 16 ]`).
+  - **Visual Cartesian Sweep Grid**: Renders an interactive bottom panel displaying parameter columns, vertically stacked conditions, centered `✖` multiplication symbols, and total scheduled run count ($N_1 \times N_2 \dots$).
+  - **Sequential FIFO Queue Execution (`mlx_commander --run-queue`)**: Strictly enforces sequential execution to protect Unified Memory from thrashing, swap exhaustion, and macOS `SIGKILL` kernel panics.
+  - **Run Management**: Add (`F6`), clone (`c`), delete (`d`), clear (`x`), or load (`Enter`) runs to tweak parameters on the fly.
+
+- **Generative Test Set Evaluation Engine (experimental)**:
+  - Evaluates real token-by-token generation on `test.jsonl` deterministically (unlike standard `mlx_lm.lora --test` which only measures teacher-forced perplexity).
+  - **Physics-Grounded Throughput Engine**: Computes model-dependent generation throughput ($\text{tok/s} \propto \frac{\text{Memory Bandwidth}}{\text{Model Active Weights}}$) scaling inversely with model parameter count ($1\text{B} > 3\text{B} > 8\text{B} > 70\text{B}$) and precision (4-bit vs fp16).
+  - **Live Milestone & Dynamic ETA**: Real-time `\r` terminal progress updates (`Sample 25/50 (50%) | 148.4 tok/s | ETA: 18s`) with continuous cursor movement.
+  - **Deterministic Metrics**: Exact Match (Strict & SQuAD-normalized), Substring Contains, and Word-Level F1 (Precision & Recall).
+  - **Matrix of Wrong Answers**: Categorical Confusion Matrix & 2×2 Model Migration / Regression Matrix (`FIXED`, `REGRESSED`, `PRESERVED`, `PERSISTENT_FAIL`).
+  - **3-Tier Storage Artifacts**: Master `eval_leaderboard.csv` (opens in Apple Numbers/Excel), per-run `eval_summary.json` & `eval_predictions.jsonl`, and standalone zero-dependency offline `eval_comparison.html` dashboard.
+  - **Weights & Biases (W&B) Logging**: Streams training loss and uploads interactive test prediction tables (`wandb.Table`) with prompt diffs and confusion heatmaps.
+
+- **Dataset Preparation & Standardization (Mode 1)**:
+  - Converts Hugging Face datasets into 4 standardized Apple MLX formats:
+    1. **`prompt_completion`**: `{"prompt": "...", "completion": "..."}` (`mlx_lm.lora --mask-prompt` compatible).
+    2. **`chat`**: `{"messages": [{"role": "system|user|assistant", "content": "..."}]}` (multi-turn instruction tuning).
+    3. **`text`**: `{"text": "..."}` (causal LM / continued pre-training).
+    4. **`dpo`**: `{"prompt": "...", "chosen": "...", "rejected": "..."}` (Direct Preference Optimization).
+  - Multi-column concatenation (`+`) with user ordering (e.g. `instruction + input`).
+  - Multi-file selection and dataset merging with reproducible random seeds.
+  - Live reactive preview of formatted JSONL records.
+  - Machine-readable manifest handshake (`mlx_manifest.json`).
+  - Supports Parquet, Arrow, Hugging Face `save_to_disk`, JSONL, JSON, CSV, TSV, SQLite, and WebDataset.
+
+- **Modern AI Agent & MCP Integration**:
+  - Full Model Context Protocol (MCP) server over `stdio` for Claude Desktop, Cursor, Antigravity, and Zed.
+  - Native macOS Cocoa Finder file pickers and external macOS `Terminal.app` spawner.
 
 ![Inspired by Norton Commander, with a classic color scheme available in TUI](docs/images/screenshot2.png)
 
-*Inspired by Norton Commander, with a classic color scheme available in TUI*
+*Inspired by Norton Commander, with high-contrast, productive keybindings*
 
 ---
 
 ## 📦 Quick Start
 
-### 1. Launch MLX Commander (Default)
+### 1. Installation
 
-Launch the interactive dashboard using any of these equivalent commands:
-
+Install via `pip` from PyPI:
 ```bash
-# Install via pip from PyPI and run anywhere:
 pip install mlx_commander
-mlx_commander
 
-# Or install with all format extras (Parquet, Arrow, DuckDB, Lance, MCP):
+# Or install with all optional extras (Parquet, Arrow, DuckDB, Lance, MCP):
 pip install "mlx_commander[all]"
-mlx_commander
+```
 
-# Or run instantly without installation via uvx:
+Or run instantly without installation using `uvx`:
+```bash
 uvx mlx_commander
+```
 
-# Or install globally as a tool via uv:
+Or install globally as a standalone tool via `uv`:
+```bash
 uv tool install mlx_commander
+```
+
+---
+
+### 2. Launching Modes
+
+MLX Commander features a 3-mode switcher (`F2` inside the TUI or via command-line flags):
+
+```bash
+# 1. Launch directly into Mode 2: Fine-Tuning Single Run
+mlx_commander --lora
+
+# 2. Launch directly into Mode 3: Fine-Tuning Multi-Run (Hyperparameter Sweeps)
+mlx_commander --multi-run
+
+# 3. Launch directly into Mode 1: Dataset Converter (Default)
 mlx_commander
 
-# Recommended for local repository execution (Primary):
-python3 mlx_commander.py
-
-# Or via secondary compatibility alias:
-python3 run.py
-
-# Or as a Python package module:
-python3 -m mlx_commander
+# 4. Execute all queued runs sequentially in an external window:
+mlx_commander --run-queue ./mlx_runs
 ```
 
-You can also pass arguments directly (e.g. pre-loading a dataset or multiple files):
+---
+
+### 3. Headless Scripting & Automation
+
+You can bypass the TUI entirely for automated pipelines and remote scripts:
+
+#### Headless Dataset Conversion:
 ```bash
-python3 mlx_commander.py -d /path/to/my_hf_dataset
-# Or combine multiple files:
-python3 mlx_commander.py -d train.jsonl test.jsonl
-# (python3 run.py accepts all the same arguments)
-```
-
-### 2. Line-by-Line Wizard Mode
-
-For SSH sessions or non-curses environments:
-
-```bash
-python3 mlx_commander.py --wizard
-```
-
-### 3. Direct Command-Line Conversion (Automated / Headless)
-
-You can pass all options via flags for direct scripted conversions:
-
-```bash
-python3 mlx_commander.py \
-  --dataset /path/to/my_hf_dataset \
+mlx_commander \
+  --dataset /path/to/my_hf_dataset.parquet \
   --format prompt_completion \
-  --prompt-col instruction \
-  --completion-col output \
-  --output ./mlx_data \
-  --train 80 \
-  --valid 10 \
-  --test 10 \
-  --seed 42
+  --prompt-col question \
+  --completion-col answer \
+  --train 80 --valid 10 --test 10 \
+  --output ./mlx_data
 ```
+
+#### Headless Sequential Queue Execution:
+```bash
+python3 -m mlx_commander --run-queue ./mlx_runs
+```
+
+---
+
+## 🎛️ Mode 2: Fine-Tuning Single Run Orchestration
+
+Press **`[F2]`** inside the TUI or pass `--lora` from the command line to enter **Fine-Tuning Single Run Mode**.
+
+```bash
+mlx_commander --lora
+```
+
+### 1. Dual-Panel Setup
+- **Top Left Panel (Model & Dataset Setup)**:
+  - **Base Model Picker**: Quick-select from curated 4-bit Apple MLX community models (`Llama-3.2-3B`, `Llama-3.1-8B`, `Qwen2.5-7B`, `Mistral-7B`, `Phi-3.5-mini`, etc.) or input any custom Hugging Face model repository or local weights path.
+  - **Dataset Directory**: Auto-synced from Mode 1 conversion output or selected via local path / native macOS Finder picker.
+  - **Method**: Select `lora`, `dora` (Weight-Decomposed Low-Rank Adaptation), or `full`.
+  - **Optimizer**: Pick `adamw` or `adam`.
+  - **Run Name**: Custom label or auto-generated descriptive run signature.
+
+- **Top Right Panel (Explicit Hyperparameters & Resource Estimators)**:
+  - **22 Explicit Parameters**: All fine-tuning knobs exposed with tested defaults: `iters`, `batch_size`, `gradient_accumulation_steps`, `learning_rate`, `lora_rank`, `lora_alpha`, `lora_dropout`, `max_seq_length`, `num_layers`, `grad_checkpoint`, `mask_prompt`, `save_every`, `steps_per_eval`, and `adapter_path`.
+  - **Unified RAM Safety Estimator**: Detects your Apple Silicon chip and physical RAM via `sysctl hw.memsize` and computes peak memory consumption:
+    - **`[SAFE]`** (<70% RAM): Ample headroom for macOS and display compositor.
+    - **`[TIGHT]`** (70–85% RAM): Viable, but approaching memory pressure limits.
+    - **`[OOM RISK]`** (>85% RAM): Proactively warns before training begins and suggests enabling `grad_checkpoint` or reducing batch size.
+  - **Implied Number of Epochs**: Calculated in real time via:
+    $$\text{Epochs} = \frac{\text{iters} \times \text{batch\_size} \times \text{gradient\_accumulation\_steps}}{\text{total\_train\_records}}$$
+    Highlighted in **dark red** if $< 1.0$ to alert you that the model will not observe the complete dataset.
+  - **Wall-Clock Duration & Clock ETA**: Estimates execution duration and completion time based on your chip's compute throughput.
+
+---
+
+### 2. Vision-Language & Multimodal Safeguards (`mlx_vlm`)
+
+When training multimodal models (such as Gemma 4, Qwen2-VL, PaliGemma, or SmolVLM) via `mlx-vlm`, micro-batch sizes greater than 1 trigger attention mask shape broadcasting errors due to unpadded multimodal token masks.
+
+MLX Commander automatically detects `mlx_vlm` models and applies mathematical equivalence:
+$$\text{batch\_size} \leftarrow 1$$
+$$\text{gradient\_accumulation\_steps} \leftarrow \text{batch\_size} \times \text{gradient\_accumulation\_steps}$$
+
+This preserves identical effective batch size and gradient step dynamics while preventing runtime crashes:
+```text
+[MLX-VLM Safeguard] Detected mlx-vlm model with batch_size=4.
+Auto-tweaked to batch_size=1 and gradient_accumulation_steps=4 (effective batch size: 4).
+```
+
+---
+
+### 3. Live Validation Loss Milestones
+
+When `valid.jsonl` is present in the dataset folder, MLX Commander automatically loads it into `val_dataset` and computes validation loss every `steps_per_eval` iterations, highlighting progress milestones in the terminal:
+```text
+★ [Validation Loss Milestone] Iter 100: Val loss = 1.234 (val took 0.54s)
+```
+
+---
+
+## 🎛️ Mode 3: Fine-Tuning Multi-Run (Hyperparameter Sweeps)
+
+Press **`[F2]`** inside the TUI or pass `--multi-run` from the command line to switch to **Fine-Tuning Multi-Run Mode**.
+
+```bash
+mlx_commander --multi-run
+```
+
+### 1. Single-Line Multi-Value Fields with Clickable Targets
+Configure multiple sweep conditions directly on a single line:
+```text
+Learning Rate:    [ 1e-4 ]  [ 2e-4 ]  [ 5e-4 ]
+LoRA Rank (r):    [ 4 ]  [ 8 ]  [ 16 ]
+Grad Accum Steps: [ 1 ]  [ 2 ]
+Mask Prompt:      [ True ]  [ False ]
+```
+The rightmost bracketed box represents the active target. Press `Enter` to open a modal dialog to append or edit values as a comma-separated list (e.g. `1e-4, 2e-4, 5e-4`).
+
+---
+
+### 2. Visual Cartesian Sweep Grid
+The lower panel renders an interactive Cartesian product grid showing parameter columns, vertically stacked condition cells with dividers, centered `✖` multiplication symbols, and the total scheduled run count (e.g. $3 \times 3 \times 2 \times 2 = 36 \text{ runs}$).
+
+Aggregated sweep estimates update reactively:
+- **Peak Unified RAM**: Maximum RAM footprint across all sweep conditions.
+- **Total Duration**: Sum of estimated wall-clock durations for all scheduled jobs.
+- **Min Implied Epochs**: Minimum implied epochs across conditions.
+
+---
+
+### 3. Sequential FIFO Queue Execution
+
+> [!IMPORTANT]
+> **Sequential Execution Only**: Attempting to train multiple LLMs concurrently on Apple Silicon causes catastrophic Unified Memory contention, disk swap thrashing, and kernel panics. MLX Commander strictly processes queued jobs sequentially (FIFO).
+
+Press **`[F5 Run Queue]`**:
+- Spawns a dedicated macOS Terminal.app window running `mlx_commander --run-queue mlx_runs`.
+- Stdout, training loss, and throughput stream live.
+- **You can safely close the main MLX Commander TUI** while background training proceeds undisturbed.
+
+---
+
+## 📊 Generative Test Set Evaluation Engine (experimental)
+
+Standard `mlx_lm.lora --test` only computes cross-entropy loss and perplexity via teacher forcing—it never prompts the model to generate text.
+
+MLX Commander features a built-in **Generative Evaluation Engine** tagged as `(experimental)`. When enabled (`Run evals on test set: [ Yes ]` or `run_eval=True`), the fine-tuned model loads upon training completion, generates answers token-by-token on `test.jsonl`, and deterministically evaluates completions against reference targets without external scripts.
+
+---
+
+### 1. Physics-Grounded Throughput Engine & Dynamic ETA
+
+Autoregressive token decoding is strictly memory-bandwidth bound:
+$$\text{Generation Speed (tok/s)} \approx \frac{\text{Unified Memory Bandwidth (GB/s)}}{\text{Active Model Weight Footprint (GB)}} \times 0.65$$
+
+Throughput scales inversely with model parameter count and precision:
+- **1B–3B 4-bit model** (~0.7–2.0 GB): **150–350 tok/s** (~35s for 50 samples).
+- **8B 4-bit model** (~5.2 GB): **40–60 tok/s** (~1m 20s for 50 samples).
+- **70B 4-bit model** (~45.5 GB): **5–8 tok/s** (~10m 30s for 50 samples).
+- **8B fp16 unquantized** (~16.0 GB): **14–18 tok/s** (~3m 45s for 50 samples).
+
+#### Pre-Evaluation Header:
+Before inference starts, the runner prints explicit targets and estimated duration:
+```text
+[MLX Commander] Starting Generative Evaluation on test set:
+  • Target Checkpoint: adapters/01_run/adapters.safetensors (Final trained adapter)
+  • Base Model:        mlx-community/Llama-3.2-3B-Instruct-4bit [Engine: mlx_lm]
+  • Test Dataset:      dataset/test.jsonl (Full split: 50 samples)
+  • Evaluation Passes: 2 passes (Baseline + Fine-Tuned = 100 generations)
+  • Estimated Time:    ~35s (model: ~3B 4-bit [~2.0 GB], est. speed: ~150 tok/s on Apple M5 Max)
+```
+
+#### Real-Time Milestone Reporting:
+During generation, live terminal updates display sample progress, speed, and countdown ETA:
+```text
+  • [2/2 Fine-Tuned Adapter] Sample 25/50 (50%) | 148.4 tok/s | ETA: 18s
+```
+
+---
+
+### 2. Evaluated Metrics
+
+1. **Exact Match (Strict & Normalized)**:
+   - *Strict*: Character-for-character equality (`gen == golden`).
+   - *Normalized*: SQuAD-standard matching stripping whitespace, punctuation, and English articles (`a`, `an`, `the`).
+2. **Substring Contains Match**:
+   - Verifies whether the golden completion appears inside the generated text.
+3. **Word-Level Precision, Recall, and F1 Score**:
+   - Evaluates factual overlap and gives fair partial credit when the model responds in full sentences.
+4. **Generation Speed & Efficiency**:
+   - Reports sustained tokens per second (TPS) and sample latency.
+
+---
+
+### 3. The "Matrix of Wrong Answers"
+
+1. **Categorical Confusion Matrix** (for classification tasks with $\le 15$ classes):
+   - Computes an `[Actual] × [Predicted]` confusion matrix with per-class recall and overall accuracy.
+2. **2×2 Model Migration & Regression Matrix** (comparing Pre-Trained Baseline vs Post-Tuning LoRA):
+
+```text
+                        POST-TUNING (LoRA)
+                     CORRECT           WRONG
+                ┌────────────────┬────────────────┐
+      CORRECT   │   PRESERVED    │   REGRESSED    │  ◄ Catastrophic forgetting!
+BASELINE        ├────────────────┼────────────────┤
+      WRONG     │     FIXED      │   PERSISTENT   │  ◄ Where LoRA healed the model!
+                └────────────────┴────────────────┘
+```
+- **`FIXED`**: Baseline failed, but LoRA answered correctly (healed!).
+- **`REGRESSED`**: Baseline answered correctly, but LoRA failed (catastrophic forgetting).
+- **`PRESERVED`**: Both models answered correctly.
+- **`PERSISTENT_FAIL`**: Hard samples failed by both models.
+
+---
+
+### 4. 3-Tier Storage & Offline Dashboard
+
+Evaluation results are organized hierarchically:
+
+```text
+models/Llama-3.2-3B/adapters/
+├── eval_leaderboard.csv                    <-- TIER 1: Master CSV (open in Numbers/Excel)
+├── eval_comparison.html                   <-- TIER 3: Standalone interactive dashboard
+│
+└── 01_lora_r16_a32_lr1e-4_b4_i1000/
+    ├── adapters.safetensors
+    ├── eval_summary.json                  <-- TIER 2: Run metadata & matrix stats
+    └── eval_predictions.jsonl             <-- TIER 2: Row-by-row prompts, answers, & diffs
+```
+
+- **Tier 1 (`eval_leaderboard.csv`)**: Appends a row for every completed run with F1, Exact Match %, regression counts, and speed. Open directly in Apple Numbers, Excel, or Google Sheets to rank sweep runs.
+- **Tier 2 (`eval_summary.json` & `eval_predictions.jsonl`)**: Saved inside each run's adapter folder with full prompts, outputs, and transition flags.
+- **Tier 3 (`eval_comparison.html`)**: Standalone offline HTML dashboard with metric scorecards, sortable leaderboards, and a **Sample Explorer** with filter buttons (`[ All ]`, `[ ⚠️ Regressed Only ]`, `[ ❇️ Fixed Only ]`, `[ Preserved ]`, `[ Persistent Fail ]`).
+- **Weights & Biases (W&B)**: Uploads interactive `wandb.Table` prediction diffs and confusion heatmaps.
+
+---
+
+## 🔄 Mode 1: Dataset Preparation & Ingestion
+
+Press **`[F2]`** to switch to **Dataset Converter Mode** (the default startup view).
+
+### 1. Supported MLX Formats
+1. **`prompt_completion`**: Q&A, instruction pairs, or query/code.
+2. **`chat`**: Multi-turn dialogue (`{"messages": [...]}`). Supports OpenAI / ShareGPT formats or separate role columns.
+3. **`text`**: Raw causal language modeling / pre-training (`{"text": "..."}`).
+4. **`dpo`**: Direct Preference Optimization (`{"prompt": "...", "chosen": "...", "rejected": "..."}`).
+
+### 2. Multi-Column Concatenation & Multi-File Merging
+- Tap `Space` on original dataset columns to combine multiple fields (e.g. `instruction + input`) joined by `\n\n`.
+- Select multiple dataset files simultaneously (e.g. pre-split `train.jsonl` and `test.jsonl`). Verifies column schemas match and re-splits with reproducible random seeds.
+
+### 3. Machine-Readable Manifest Handshake (`mlx_manifest.json`)
+Every conversion emits a structured JSON manifest containing record counts, file sizes, and copy-paste fine-tuning commands:
+
+```json
+{
+  "status": "success",
+  "format": "prompt_completion",
+  "source_path": "/path/to/source.parquet",
+  "output_dir": "/path/to/mlx_dataset",
+  "files": {
+    "train": {"path": "/path/to/mlx_dataset/train.jsonl", "records": 8000},
+    "valid": {"path": "/path/to/mlx_dataset/valid.jsonl", "records": 1000},
+    "test": {"path": "/path/to/mlx_dataset/test.jsonl", "records": 1000}
+  },
+  "total_records": 10000,
+  "seed_used": 42,
+  "mlx_lora_command": "mlx_lm.lora --model mlx-community/Llama-3.2-3B-Instruct-4bit --train --data /path/to/mlx_dataset --mask-prompt --iters 600 --batch-size 4"
+}
+```
+
+---
+
+## 🤖 AI Agent Integration & MCP Server
+
+MLX Commander includes a native Model Context Protocol (MCP) server over `stdio` designed for **Antigravity**, **Claude Desktop**, **Cursor**, **Zed**, and **Cline**.
+
+### 1. Configuration
+
+#### Claude Desktop (`claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "mlx_commander": {
+      "command": "python3",
+      "args": ["-m", "mlx_commander", "--mcp"]
+    }
+  }
+}
+```
+
+#### Cursor (`.cursor/mcp.json`):
+```json
+{
+  "mcpServers": {
+    "mlx_commander": {
+      "command": "python3",
+      "args": ["-m", "mlx_commander", "--mcp"]
+    }
+  }
+}
+```
+
+---
+
+### 2. Exposed MCP Tools
+
+| MCP Tool | Category | Description | Key Arguments |
+|---|---|---|---|
+| `inspect_dataset` | Dataset | Inspects dataset columns, total rows, splits, and candidate mappings. | `dataset_path: str` |
+| `convert_dataset_headless` | Dataset | Converts dataset directly to MLX JSONL format in the background. | `dataset_path`, `format`, `prompt_col`, `completion_col`, `train_pct`, `valid_pct`, `test_pct` |
+| `launch_conversion_tui` | Dataset | Pre-populates and opens TUI in macOS Terminal.app for visual review. | Same as `convert_dataset_headless` |
+| `estimate_fine_tuning_resources` | Fine-Tuning | Estimates peak Unified Memory (GB), safety tier, implied epochs, and duration. | `model`, `iters`, `batch_size`, `gradient_accumulation_steps`, `max_seq_length`, `lora_rank` |
+| `queue_single_run` | Fine-Tuning | Enqueues a single fine-tuning job with explicit parameters and VLM safeguards. | `model`, `data_path`, `learning_rate`, `batch_size`, `gradient_accumulation_steps`, `run_eval` |
+| `queue_multi_run_sweep` | Fine-Tuning | Expands hyperparameter sweep grid (Cartesian product) and enqueues all runs. | `model`, `data_path`, `learning_rate: List[float]`, `lora_rank: List[int]`, `run_eval: List[bool]` |
+| `inspect_queue` | Orchestration | Returns status of all queued, running, completed, and failed jobs. | `queue_dir: str = "mlx_runs"` |
+| `execute_queue` | Orchestration | Executes queued jobs sequentially (spawns macOS Terminal or headless). | `queue_dir: str = "mlx_runs"`, `spawn_terminal: bool = True` |
+| `run_test_evaluation` | Evaluation | Executes generative evaluation on `test.jsonl` and builds HTML dashboard. | `model`, `adapter_path`, `data_path`, `max_tokens: int = 128` |
+| `estimate_test_eval_throughput` | Evaluation | Computes model-dependent generation throughput (tok/s) and eval duration. | `model_name`, `total_samples: int = 50`, `num_passes: int = 2` |
+| `launch_lora_tui` | UI | Spawns interactive TUI directly in Mode 2 (Single Run) or Mode 3 (Multi-Run). | `mode: int = 2` (or `3`), `dataset_path`, `model`, `queue_dir` |
+
+---
+
+### 3. Exposed MCP Prompts
+- **`prepare_dataset_for_mlx`**: Guides agents through inspecting schema, selecting format, and converting datasets.
+- **`orchestrate_fine_tuning`**: Instructs agents on memory estimation, VLM safeguards, sweep queueing, sequential execution, and test evaluations.
 
 ---
 
@@ -123,397 +421,40 @@ usage: mlx_commander [-h] [-v] [-d DATASET [DATASET ...]]
                      [--messages-col MESSAGES_COL] [--user-col USER_COL]
                      [--assistant-col ASSISTANT_COL] [--system-col SYSTEM_COL]
                      [--chosen-col CHOSEN_COL] [--rejected-col REJECTED_COL]
-                     [--commander] [--wizard]
+                     [--manifest-file MANIFEST_FILE] [--prefill-state PREFILL_STATE]
+                     [--spawn-terminal] [--lora] [--multi-run]
+                     [--run-queue [DIR]] [--mcp] [--tui] [--no-tui] [--wizard]
 ```
 
 ### Key Flags:
 
-| Flag | Description |
-|---|---|
-| `-d`, `--dataset` | Path to HF dataset directory or file on disk (`.arrow`, `.parquet`, `.jsonl`, `.json`, `.csv`). |
-| `-f`, `--format` | Target MLX format (`text`, `chat`, `prompt_completion`, `dpo`). |
-| `-o`, `--output` | Destination directory where `train.jsonl`, `valid.jsonl`, and `test.jsonl` are saved. |
-| `--train` | Percentage of data for training (e.g. `80.0`). |
-| `--valid` | Percentage of data for validation (e.g. `10.0`). |
-| `--test` | Percentage of data for test (e.g. `10.0`, or `0` to omit). |
-| `--seed` | Integer random seed for reproducible random shuffling. |
-| `--keep-splits` | Preserve existing dataset splits without re-splitting. |
-| `--text-col` | Column to use as `text` for `text` format. |
-| `--text-template`| Template string with `{column_name}` variables for `text` format. |
-| `--prompt-col` | Column to map to `prompt`. |
-| `--completion-col` | Column to map to `completion`. |
-| `--messages-col` | Column containing conversation turns list for `chat` format. |
-| `--user-col` | Column for user turn in multi-column `chat` format. |
-| `--assistant-col`| Column for assistant turn in multi-column `chat` format. |
-| `--system-col` | Column for system prompt in multi-column `chat` format. |
-| `--chosen-col` | Column for preferred response in `dpo` format. |
-| `--rejected-col`| Column for dispreferred response in `dpo` format. |
-| `--manifest-file`| Custom file path where machine-readable `mlx_manifest.json` will be saved. |
-| `--prefill-state`| Pre-populate TUI state from a JSON string or path to JSON file. |
-| `--spawn-terminal`| Launch interactive TUI in an external macOS Terminal window. |
-| `--lora` | Launch TUI directly into LoRA Fine-Tuning mode (Mode 2). |
-| `--run-queue [DIR]`| Execute queued LoRA fine-tuning runs sequentially (default: `mlx_runs`). |
-| `--mcp` | Start Model Context Protocol (MCP) server over stdio. |
-| `--tui` | Force launch full-screen curses TUI. |
-| `--no-tui`, `--cli` | Run line-by-line CLI wizard instead of curses TUI. |
-
----
-
-## 🦙 Apple MLX LoRA Fine-Tuning & Queue Orchestration (Mode 2)
-
-MLX Commander features a dedicated **LoRA Fine-Tuning Dashboard** alongside Dataset Conversion. Press **`[F2]`** inside the TUI or pass `--lora` from the command line to switch modes.
-
-```bash
-# Launch directly into Mode 2 (LoRA Fine-Tuning):
-mlx_commander --lora
-```
-
-### 1. Dual-Panel Fine-Tuning Setup
-- **Top Left Panel (Model & Dataset Setup)**:
-  - **Base Model Picker**: Instant select from curated 4-bit Apple MLX models (`Llama-3.2-3B`, `Llama-3.1-8B`, `Qwen2.5-7B`, `Mistral-7B`, `Phi-3.5-mini`, etc.) or input custom Hugging Face model IDs and local weights.
-  - **Dataset Directory**: Auto-synced from Mode 1 conversion output, or selected via macOS Finder / local path entry.
-  - **Method**: Select `lora`, `dora` (Weight-Decomposed Low-Rank Adaptation), or `full`.
-  - **Optimizer**: Pick `adamw` or `adam`.
-  - **Run Name**: Custom label or auto-generated descriptive run title.
-
-- **Top Right Panel (Explicit Hyperparameters & Hardware Estimators)**:
-  - **Explicit Hyperparameters**: All 22 MLX fine-tuning parameters made explicit with production defaults: `iters`, `batch_size`, `learning_rate`, `lora_rank`, `lora_alpha`, `lora_dropout`, `max_seq_length`, `num_layers`, `grad_checkpoint`, `mask_prompt`, `save_every`, `steps_per_eval`, and `adapter_path`.
-  - **Reactive Implied Number of Epochs**: Automatically calculated via `(iters * batch_size) / total_train_records`.
-  - **Unified Memory Estimator**: Detects your exact Apple Silicon chip and physical RAM via `sysctl hw.memsize` and computes peak memory consumption:
-    - **`[SAFE]`** (<70% RAM): Ideal headroom for macOS window server and applications.
-    - **`[TIGHT]`** (70–85% RAM): Viable, but close to memory pressure thresholds.
-    - **`[OOM RISK]`** (>85% RAM): Flags configuration risk and recommends enabling gradient checkpointing or reducing batch size/sequence length before you start training.
-  - **Duration & Clock ETA**: Estimates wall-clock training time based on hardware throughput and step count.
-
-### 2. Central Queue & Config Browser
-Queue up multiple experiments (e.g. testing 3 learning rates across 2 models) in a persistent FIFO queue:
-- **`[F6]` Add Run**: Saves current configuration to the queue (`mlx_runs/configs/<run_id>.yaml` and `mlx_runs/queue.json`).
-- **`[c]` Clone**: Duplicate the highlighted run to quickly tweak a single parameter like learning rate or rank.
-- **`[d]` Delete**: Remove a run from the queue.
-- **`[x]` Clear**: Empty the queue.
-- **`[Enter]` Load**: Load any queued run back into the editor form to inspect or modify it.
-
-### 3. Sequential Queue Execution
-> [!IMPORTANT]
-> **Sequential Execution Only**: Running multiple LLM fine-tuning runs simultaneously causes severe unified memory thrashing, swap exhaustion, and macOS `SIGKILL` kernel panics. MLX Commander strictly enforces sequential execution (FIFO).
-
-Press **`[F5 Run Queue]`**:
-- MLX Commander automatically spawns an independent macOS Terminal.app window running `mlx_commander --run-queue mlx_runs`.
-- Training stdout, iteration loss, and throughput stream live in the external window.
-- **You may safely close MLX Commander at any time** without interrupting background training.
-- You can also run the queue headless on headless servers or subshells:
-  ```bash
-  python3 -m mlx_commander --run-queue ./mlx_runs
-  ```
-
----
-
-## 🤖 AI Agent Integration & MCP Support
-
-MLX Commander is designed for the modern AI agent era (**Antigravity**, **Claude Desktop**, **Cursor**, **Zed**, **Cline**). 
-
-Instead of an agent interrogating users with 10 sequential chat prompts or guessing schemas blindly, agents can **inspect schemas, formulate recommended settings, and launch MLX Commander with pre-populated values**. 
-
-The user gets a 3-second tactile review with live JSONL preview in the Norton Commander TUI, presses **[F5 Convert]**, and hands control back to the agent with a machine-readable manifest.
-
-### 🔄 The End-to-End Workflow
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User as User (Human Developer)
-    participant Agent as AI Agent (Antigravity / Claude / Cursor)
-    participant TUI as MLX Commander TUI (macOS Terminal)
-    actor MLX as MLX Engine (mlx_lm.lora)
-
-    User->>Agent: "Convert dataset.parquet and fine-tune Llama 3 on it."
-    Agent->>Agent: Inspects schema, picks target format, maps columns & splits
-    Agent->>TUI: Launches TUI with pre-populated arguments (--tui --spawn-terminal)
-    Note over User,TUI: TUI pops up in macOS Terminal with fields pre-filled & live preview rendered.<br/>User reviews with arrow keys, presses [F5 Convert].
-    TUI->>TUI: Converts dataset, writes mlx_dataset/ & mlx_manifest.json
-    TUI-->>Agent: Closes window & returns exit code 0
-    Agent->>Agent: Reads mlx_manifest.json (split counts, paths, lora command)
-    Agent->>User: "Dataset converted (8,000 train / 1,000 valid / 1,000 test). Starting LoRA training..."
-    Agent->>MLX: Executes mlx_lm.lora training run
-```
-
----
-
-### The Three Architectural Hand-offs
-
-#### 1. Hand-off 1: TUI State Pre-Population
-Agents can pre-populate every field of `CommanderState` via CLI flags or a JSON payload:
-- **Via CLI Flags**:
-  ```bash
-  mlx_commander --tui --spawn-terminal \
-    --dataset "./data.parquet" \
-    --format chat \
-    --messages-col conversations \
-    --train 85 --valid 15 \
-    --output "./mlx_dataset"
-  ```
-- **Via JSON (`--prefill-state`)**:
-  ```bash
-  mlx_commander --tui --spawn-terminal \
-    --prefill-state '{"dataset": "./data.parquet", "format": "prompt_completion", "prompt_col": "question", "completion_col": "answer", "train": 80, "valid": 20}'
-  ```
-When launched with pre-fill data, the TUI opens directly with focus on the mappings panel and renders the reactive JSONL preview immediately.
-
-#### 2. Hand-off 2: Machine-Readable Manifest Handshake (`mlx_manifest.json`)
-Every conversion automatically outputs `output_dir/mlx_manifest.json` (or to a custom path specified with `--manifest-file <path>`):
-
-```json
-{
-  "status": "success",
-  "format": "prompt_completion",
-  "source_path": "/path/to/source.parquet",
-  "output_dir": "/path/to/mlx_dataset",
-  "files": {
-    "train": {
-      "path": "/path/to/mlx_dataset/train.jsonl",
-      "filename": "train.jsonl",
-      "records": 8000,
-      "size_bytes": 1048576
-    },
-    "valid": {
-      "path": "/path/to/mlx_dataset/valid.jsonl",
-      "filename": "valid.jsonl",
-      "records": 1000,
-      "size_bytes": 131072
-    },
-    "test": {
-      "path": "/path/to/mlx_dataset/test.jsonl",
-      "filename": "test.jsonl",
-      "records": 1000,
-      "size_bytes": 131072
-    }
-  },
-  "splits": { "train": 8000, "valid": 1000, "test": 1000 },
-  "total_records": 10000,
-  "seed_used": 42,
-  "mlx_lora_command": "mlx_lm.lora --model mlx-community/Llama-3.2-3B-Instruct-4bit --train --data /path/to/mlx_dataset --mask-prompt --iters 600 --batch-size 4",
-  "manifest_path": "/path/to/mlx_dataset/mlx_manifest.json"
-}
-```
-
-- **Exit Code 0**: Conversion succeeded; manifest written.
-- **Exit Code 130**: User cancelled/closed the TUI without converting. If `--manifest-file` was set, writes `{"status": "cancelled"}`.
-
-#### 3. Hand-off 3: macOS Terminal.app Spawner
-When invoked by background agent runners (such as IDE extensions, subshells, or MCP daemons) without an active TTY:
-- Passing `--spawn-terminal` (or auto-detected on macOS in non-interactive sessions) executes the TUI in a dedicated macOS `Terminal.app` window via AppleScript.
-- The calling process blocks synchronously until the user converts or exits, then unblocks and returns the exit code and manifest.
-
----
-
-### Model Context Protocol (MCP) Server
-
-MLX Commander includes a built-in MCP server that works over `stdio`.
-
-#### 1. Claude Desktop Setup (`claude_desktop_config.json`):
-```json
-{
-  "mcpServers": {
-    "mlx_commander": {
-      "command": "python3",
-      "args": ["-m", "mlx_commander", "--mcp"]
-    }
-  }
-}
-```
-*Or via zero-install `uvx`:*
-```json
-{
-  "mcpServers": {
-    "mlx_commander": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/tomkubik/mlx_commander.git", "--with", "mcp", "mlx_commander", "--mcp"]
-    }
-  }
-}
-```
-
-#### 2. Cursor Setup (`.cursor/mcp.json`):
-```json
-{
-  "mcpServers": {
-    "mlx_commander": {
-      "command": "python3",
-      "args": ["-m", "mlx_commander", "--mcp"]
-    }
-  }
-}
-```
-
-#### 3. Exposed MCP Tools:
-
-| MCP Tool | Description | Arguments |
+| Flag | Category | Description |
 |---|---|---|
-| `inspect_dataset` | Inspects columns, total rows, split names, sample records, and auto-detects candidate mappings. | `dataset_path: str` |
-| `launch_conversion_tui` | Pre-populates and opens the TUI in macOS Terminal.app for user review. Returns conversion manifest. | `dataset_path`, `format`, `prompt_col`, `completion_col`, `messages_col`, `train_pct`, `valid_pct`, `test_pct`, `output_dir` |
-| `convert_dataset_headless` | Runs direct headless conversion in background without opening TUI. Returns conversion manifest. | Same arguments as `launch_conversion_tui` |
-
-#### 4. Exposed MCP Prompt:
-- **`prepare_dataset_for_mlx`**: Instructs the model on the optimal workflow to inspect the schema, formulate column mappings, and launch the conversion TUI.
-
----
-
-### Agent Skill (`SKILL.md`)
-
-A standardized skill specification is included in the repository:
-- Skill path: [`.agents/skills/mlx-dataset-prep/SKILL.md`](.agents/skills/mlx-dataset-prep/SKILL.md)
-
-AI agents that support skill discovery (like **Antigravity**) automatically read this file when users ask to convert datasets or fine-tune models with Apple MLX.
-
----
-
-## 🛠️ Step-by-Step Wizard Walkthrough
-
-1. **Step 1: Dataset Source**: Select your dataset folder or file on your drive. The tool validates the file, inspects column names, row counts, and existing splits.
-2. **Step 2: MLX Format**: Choose your target format (`Text`, `Chat / Messages`, `Prompt & Completion`, `DPO / Preference`).
-3. **Step 3: Column Mapping**: Match dataset columns to MLX fields or enter a formatting template. The tool automatically detects candidate columns.
-4. **Step 4: Splitting & Seed**: Configure Train / Valid / Test percentages. A random seed is automatically generated, and you can accept it or provide your own.
-5. **Step 5: Output & Preview**: Specify the destination folder, review a live preview of the formatted JSONL lines, and confirm to write the files.
-6. **Step 6: Ready to Fine-Tune**: Review written file sizes, row counts, and copy the generated `mlx_lm.lora` fine-tuning command.
-
----
-
-## 🚀 Running Fine-Tuning with Apple MLX
-
-MLX Commander provides two interactive fine-tuning dashboards directly integrated with Apple MLX (`mlx-lm`):
-
----
-
-### 🎛️ Mode 2: Fine-Tuning Single Run
-
-Press `F2` to switch to `[ 2: Fine-Tuning Single Run ]`:
-- **Model & Dataset Configuration**: Select any MLX community model (e.g. `Llama-3.2-3B-Instruct-4bit`, `Qwen2.5-7B-Instruct-4bit`) or local weights.
-- **Unified RAM Safety Estimator**: Computes predicted peak unified memory footprint before starting training, rating safety as `[SAFE]`, `[TIGHT]`, or `[OOM RISK]`.
-- **Implied Epochs Calculation**:
-  $$\text{Epochs} = \frac{\text{iters} \times \text{batch\_size}}{\text{train\_records}}$$
-  If epochs $< 1.0$, the estimate is highlighted in **dark red** to warn that the model will not see the full training set.
-- **Sequential Queue Management**: Add runs to queue with `F6`, inspect queued jobs, and execute sequentially without memory thrashing.
-- **Deterministic Checkpoint Naming**: Adapters are saved with full hyperparameter signatures:
-  `0000400_adapters_lora_r16_a32_lr1e-5_b4_i1000_Llama-3.2-3B-Instruct-4bit.safetensors`
-
----
-
-### 🎛️ Mode 3: Fine-Tuning Multi-Run (Hyperparameter Sweeps)
-
-Press `F2` to switch to `[ 3: Fine-Tuning Multi-Run ]`:
-- **Single-Line Multi-Value Fields**: Specify multiple condition values per hyperparameter on a single line:
-  ```text
-  Learning Rate:    [ 1e-4 ]  [ 2e-4 ]  [ 5e-4 ]
-  LoRA Rank (r):    [ 2 ]  [ 4 ]  [ 6 ]  [ 8 ]
-  Mask Prompt:      [ True ]  [ False ]
-  ```
-- **Clickable Rightmost Target**: The rightmost box represents the active clickable target. Press `Enter` to open a modal dialog to amend or enter conditions as a comma-separated list (e.g., `2, 4, 8`).
-- **Visual Cartesian Sweep Grid**: Renders a dedicated bottom panel displaying parameter columns, vertically stacked cells with internal dividers, centered `✖` multiplication symbols, and total scheduled run count (e.g. $3 \times 4 \times 2 = 24 \text{ training runs}$).
-- **Aggregated Runtime Estimates**:
-  - **Peak Unified RAM**: Maximum peak RAM across all sweep conditions.
-  - **Total Duration**: Sum of estimated durations for all scheduled runs.
-  - **Min Implied Epochs**: Minimum implied epochs across all conditions.
-
----
-
-## 📊 Generative Test Set Evaluation Engine (experimental)
-
-Standard `mlx_lm.lora --test` only computes cross-entropy loss and perplexity via teacher forcing—it never actually prompts the model to generate text.
-
-MLX Commander includes a built-in **Generative Evaluation Engine** tagged as `(experimental)`. When enabled, the fine-tuned model loads after training, generates answers token-by-token on `test.jsonl`, and scores them deterministically against golden reference completions without requiring external scripts.
-
-### ⚙️ Enabling the Feature
-In the right-hand hyperparameter pane (available in both Mode 2 and Mode 3):
-- **Field**: `Run evals on test set (experimental): [ No ]`
-- **Default**: `No` (disabled by default so training runs quickly unless explicitly enabled)
-- **Toggling**: Press `Enter` on the field row to flip it to `[ Yes ]` (or enter `Yes, No` conditions in Mode 3).
-
----
-
-### 📈 Evaluated Metrics
-
-1. **Exact Match (Strict & Normalized)**:
-   - *Strict*: Character-for-character equality (`gen == golden`).
-   - *Normalized*: SQuAD-standard matching stripping whitespace, punctuation, and English articles (`a`, `an`, `the`).
-2. **Substring Contains Match**:
-   - Checks if the golden completion appears anywhere inside the model's generated text (e.g., Golden: `42`, Output: `The answer is 42.`).
-3. **Word-Level Precision, Recall, and F1 Score**:
-   - Evaluates the actual textual words of the output against the target:
-     - **Word Recall**: Did the model capture all key facts?
-     - **Word Precision**: Did the model avoid hallucinations and unnecessary fluff?
-     - **Word F1**: The harmonic mean giving fair partial credit when the model answers correctly in full sentences.
-4. **Generation Speed & Efficiency**:
-   - Measures inference throughput in **Tokens per Second (TPS)** and average latency per sample.
-
----
-
-### 🧩 The "Matrix of Wrong Answers"
-
-1. **Categorical Confusion Matrix** (for classification tasks):
-   - Automatically computed if the test set has $\le 15$ unique target classes.
-   - Generates a full `[Actual] × [Predicted]` confusion matrix with per-class recall and overall accuracy.
-2. **2×2 Model Migration & Regression Matrix** (for all open-ended text tasks):
-   - Automatically compares the **Baseline Pre-Trained Model** vs the **Post-Tuning LoRA Model**:
-
-```text
-                        POST-TUNING (LoRA)
-                     CORRECT           WRONG
-                ┌────────────────┬────────────────┐
-      CORRECT   │   PRESERVED    │   REGRESSED    │  ◄ Catastrophic forgetting!
-BASELINE        ├────────────────┼────────────────┤
-      WRONG     │     FIXED      │   PERSISTENT   │  ◄ Where LoRA healed the model!
-                └────────────────┴────────────────┘
-```
-- **`FIXED`**: Prompts the base model failed, but LoRA answered correctly (healed!).
-- **`REGRESSED`**: Prompts the base model got right, but LoRA broke (catastrophic forgetting).
-- **`PRESERVED`**: Prompts both models answered correctly.
-- **`PERSISTENT_FAIL`**: Hard samples failed by both models.
-
----
-
-### 💾 3-Tier Storage & Offline Dashboard
-
-Evaluation results are organized hierarchically across 3 tiers:
-
-```text
-models/Llama-3.2-3B/adapters/
-├── eval_leaderboard.csv                    <-- TIER 1: Master CSV (open in Numbers/Excel)
-├── eval_comparison.html                   <-- TIER 3: Standalone interactive dashboard
-│
-└── 01_lora_r16_a32_lr1e-4_b4_i1000/
-    ├── adapters.safetensors
-    ├── eval_summary.json                  <-- TIER 2: Run metadata & matrix stats
-    └── eval_predictions.jsonl             <-- TIER 2: Row-by-row prompts, answers, & diffs
-```
-
-1. **Tier 1: Master `eval_leaderboard.csv`**:
-   - Located at the root of `adapters/`.
-   - Appends a row for every completed run with F1, Exact Match %, regression counts, and speed.
-   - Open directly in **Apple Numbers**, **Excel**, or **Google Sheets** to rank sweep runs instantly.
-2. **Tier 2: Per-Run Granular Data (`eval_summary.json` & `eval_predictions.jsonl`)**:
-   - Saved inside each run's adapter folder.
-   - Contains row-by-row prompts, golden completions, baseline outputs, model outputs, and transition statuses.
-3. **Tier 3: Standalone Zero-Dependency `eval_comparison.html`**:
-   - Generated at `adapters/eval_comparison.html`.
-   - Works 100% offline in Safari or Chrome with zero dependencies.
-   - Features metric cards, leaderboard sorting, and a **Sample Explorer** with filter buttons:
-     `[ All ]` &bull; `[ ⚠️ Regressed Only ]` &bull; `[ ❇️ Fixed Only ]` &bull; `[ Preserved ]` &bull; `[ Persistent Fail ]`.
-
----
-
-### 📡 Weights & Biases (W&B) Integration
-
-When W&B tracking is enabled:
-- Logs scalar metrics: `eval/exact_match_pct`, `eval/word_f1`, `eval/fixed_count`, `eval/regressed_count`, `eval/tokens_per_sec`.
-- Uploads an interactive `wandb.Table` with row-by-row test prompts, outputs, and diffs.
-- Uploads interactive `wandb.plot.confusion_matrix` for categorical classification tasks.
+| `--lora` | Mode Switcher | Launch directly into Mode 2 (Fine-Tuning Single Run). |
+| `--multi-run` | Mode Switcher | Launch directly into Mode 3 (Fine-Tuning Multi-Run Sweeps). |
+| `--run-queue [DIR]` | Execution | Execute queued fine-tuning runs sequentially (default: `mlx_runs`). |
+| `-d`, `--dataset` | Data Ingestion | Path to dataset directory or file (`.parquet`, `.jsonl`, `.arrow`, `.csv`, `.sqlite`). |
+| `-f`, `--format` | Data Ingestion | Target format (`prompt_completion`, `chat`, `text`, `dpo`). |
+| `-o`, `--output` | Data Ingestion | Destination directory where `train.jsonl`, `valid.jsonl`, and `test.jsonl` are saved. |
+| `--train`, `--valid`, `--test` | Splitting | Split percentages (e.g. `--train 80 --valid 10 --test 10`). |
+| `--seed` | Splitting | Integer seed for deterministic shuffling. |
+| `--manifest-file` | Integration | Custom path where machine-readable `mlx_manifest.json` will be written. |
+| `--spawn-terminal` | Spawner | Spawns interactive TUI in an external macOS `Terminal.app` window. |
+| `--mcp` | MCP | Start Model Context Protocol server over stdio. |
+| `--wizard` | CLI | Interactive line-by-line CLI wizard (ideal for SSH sessions). |
 
 ---
 
 ## 🧪 Running Unit Tests
 
-Run the test suite with Python's built-in `unittest`:
+Run the full test suite with Python's standard library `unittest`:
 
 ```bash
-python3 -m unittest discover tests
+python3 -m unittest discover -s tests
 ```
+
+---
+
+## 📜 License
+
+MIT License. Designed with ❤️ for Apple Silicon and the open-source MLX ecosystem.

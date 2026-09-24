@@ -15,4 +15,4 @@ warnings.filterwarnings("ignore", module="transformers.audio_utils")
 # exit/cancellation on ESC across all curses pickers and dialogs.
 os.environ.setdefault("ESCDELAY", "25")
 
-__version__ = "0.5.9"
+__version__ = "0.6.0"
