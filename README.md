@@ -19,15 +19,15 @@ MLX Commander transforms your Apple Silicon Mac into an autonomous, crash-proof 
 │                                 MLX COMMANDER WORKFLOW                                  │
 ├──────────────────────────┬─────────────────────────────────┬───────────────────────────┤
 │  1. DATASET CONVERSION   │  2. RUN ORCHESTRATION           │  3. GENERATIVE EVALS      │
-│     (Hugging Face → MLX) │     (Solo Runs & Fleet Sweeps)  │     (Real Token Inference)│
+│     (Hugging Face → MLX) │     (Solo & Multi-Run Matrix)   │     [EXPERIMENTAL]        │
 │  • Parquet / Arrow / Hub │  • 🎯 Solo Runs (22 parameters) │  • 2-Pass Test Bench      │
-│  • Auto Train/Val/Test   │  • 🚀 Fleet Sweeps (Cartesian)  │  • Bandwidth-based ETA    │
+│  • Auto Train/Val/Test   │  • 🚀 Multi-Run Matrix (Grid)   │  • Bandwidth-based ETA    │
 │  • 4 Standard Formats    │  • FIFO Queue (Zero OOM Panics) │  • Exact Match & Word F1  │
 │  • Concat (+) & Merging  │  • VLM Attention-Mask Shield    │  • Offline HTML Dashboard │
 └──────────────────────────┴─────────────────────────────────┴───────────────────────────┘
 ```
 
-### 🎛️ 1. Fine-Tuning Flight Deck: Solo Runs & Fleet Sweeps
+### 🎛️ 1. Fine-Tuning Flight Deck: Solo Runs & Multi-Run Matrix
 *(Configuration & Orchestration of Single Runs and Multi-Run Hyperparameter Sweeps)*
 
 - **🎯 Solo Runs (Precision Single-Run Tuning — Mode 2)**:
@@ -37,15 +37,15 @@ MLX Commander transforms your Apple Silicon Mac into an autonomous, crash-proof 
   - **Live Validation Milestones**: Discovers `valid.jsonl` and streams validation loss checkpoints directly to the terminal (`★ [Validation Loss Milestone] Iter 100: Val loss = 1.234`).
   - **Implied Epochs Meter**: Computes dataset coverage with dark red warnings when $< 1.0$ epochs.
 
-- **🚀 Fleet Sweeps (Multi-Run Grid Search & Queue — Mode 3)**:
+- **🚀 Multi-Run Matrix (Grid Sweeps & Queue — Mode 3)**:
   - **Visual Cartesian Parameter Grid**: Test hyperparameter permutations without writing brittle bash loops. Enter single-line conditions (`Learning Rate: [ 1e-4 ] [ 2e-4 ]`, `LoRA Rank: [ 8 ] [ 16 ]`) to instantly generate an interactive $N_1 \times N_2 \dots$ sweep matrix.
   - **Crash-Proof Sequential Queue (`--run-queue`)**: Protects Apple Silicon Unified Memory from OOM thrashing, swap exhaustion, and macOS kernel panics by strictly executing queued runs in sequential FIFO order.
   - **Detached Execution**: Spawns jobs in a separate macOS `Terminal.app` window so you can close the TUI or step away while runs execute.
 
 ---
 
-### 🧪 2. Experimental Generative Test Set Evals
-*(Real Token Generation & Regression Benchmarking)*
+### 🧪 2. Generative Test Set Evals [Experimental]
+*(Real Token Generation & Regression Benchmarking — Experimental)*
 
 - **Real Decoding (Not Just Perplexity)**: Prompts the trained model token-by-token on `test.jsonl` against baseline zero-shot completions.
 - **Physics-Grounded Throughput Engine**: Calibrates evaluation tokens/second and ETA based on model parameter count, quantization, and Apple Silicon memory bandwidth ($\text{tok/s} \propto \frac{\text{Memory Bandwidth}}{\text{Model Active Weights}}$).
@@ -79,8 +79,8 @@ MLX Commander transforms your Apple Silicon Mac into an autonomous, crash-proof 
 | Capability | Feature Name | What It Does | Why It Matters on Apple Silicon |
 |---|---|---|---|
 | **Single Run Tuning** | **🎯 Solo Runs (Mode 2)** | 22 explicit MLX parameters, live validation milestones, implied epochs | Eliminates guesswork; pre-flight RAM estimator prevents OOM crashes; VLM safeguards prevent attention mask errors. |
-| **Grid Search Sweeps** | **🚀 Fleet Sweeps (Mode 3)** | Visual Cartesian grid ($N_1 \times N_2 \dots$), single-line conditions, FIFO queue | Sequential execution prevents Unified Memory thrashing, disk swap freezing, and macOS kernel panics. |
-| **Evaluation Engine** | **🧪 Generative Evals** | Real token decoding on `test.jsonl`, baseline comparison, 3-tier reports | Unlike perplexity, tests actual generative capability; physics-grounded speed model predicts exact duration. |
+| **Grid Search Sweeps** | **🚀 Multi-Run Matrix (Mode 3)** | Visual Cartesian grid ($N_1 \times N_2 \dots$), single-line conditions, FIFO queue | Sequential execution prevents Unified Memory thrashing, disk swap freezing, and macOS kernel panics. |
+| **Evaluation Engine** | **🧪 Generative Evals [Experimental]** | Real token decoding on `test.jsonl`, baseline comparison, 3-tier reports | Unlike perplexity, tests actual generative capability; physics-grounded speed model predicts exact duration. |
 | **Data Ingestion** | **🔄 MLX Dataset Prep (Mode 1)** | Converts Parquet/Arrow/JSONL/Hub to 4 MLX formats with auto-splits | Instant formatting with multi-column concat (`+`), reproducible seeds, and zero mandatory external libraries. |
 | **Autonomous Control** | **🤖 MCP Server** | 8 native tools for AI coding agents over stdio | Agents can evaluate RAM, configure sweeps, and run training queues without manual UI clicking. |
 
@@ -118,7 +118,7 @@ MLX Commander features a 3-mode switcher (`F2` inside the TUI or via command-lin
 # 1. Launch directly into Solo Runs (Mode 2: Single-Run Fine-Tuning)
 mlx_commander --lora
 
-# 2. Launch directly into Fleet Sweeps (Mode 3: Multi-Run Grid Sweeps)
+# 2. Launch directly into Multi-Run Matrix (Mode 3: Grid Sweeps & Queue)
 mlx_commander --multi-run
 
 # 3. Launch directly into Dataset Converter (Mode 1: Default)
@@ -206,9 +206,9 @@ When `valid.jsonl` is present in the dataset folder, MLX Commander automatically
 
 ---
 
-## 🚀 Mode 3: Fleet Sweeps (Multi-Run Grid Sweeps & Queue)
+## 🚀 Mode 3: Multi-Run Matrix (Grid Sweeps & Queue)
 
-Press **`[F2]`** inside the TUI or pass `--multi-run` from the command line to switch to **Fleet Sweeps Mode**.
+Press **`[F2]`** inside the TUI or pass `--multi-run` from the command line to switch to **Multi-Run Matrix Mode**.
 
 ```bash
 mlx_commander --multi-run
@@ -248,11 +248,11 @@ Press **`[F5 Run Queue]`**:
 
 ---
 
-## 📊 Generative Test Set Evaluation Engine (experimental)
+## 📊 Generative Test Set Evaluation Engine [Experimental]
 
 Standard `mlx_lm.lora --test` only computes cross-entropy loss and perplexity via teacher forcing—it never prompts the model to generate text.
 
-MLX Commander features a built-in **Generative Evaluation Engine** tagged as `(experimental)`. When enabled (`Run evals on test set: [ Yes ]` or `run_eval=True`), the fine-tuned model loads upon training completion, generates answers token-by-token on `test.jsonl`, and deterministically evaluates completions against reference targets without external scripts.
+MLX Commander features a built-in **Generative Evaluation Engine** tagged as **`[Experimental]`**. When enabled (`Run evals on test set: [ Yes ]` or `run_eval=True`), the fine-tuned model loads upon training completion, generates answers token-by-token on `test.jsonl`, and deterministically evaluates completions against reference targets without external scripts.
 
 ---
 
@@ -424,9 +424,9 @@ MLX Commander includes a native Model Context Protocol (MCP) server over `stdio`
 | `queue_multi_run_sweep` | Fine-Tuning | Expands hyperparameter sweep grid (Cartesian product) and enqueues all runs. | `model`, `data_path`, `learning_rate: List[float]`, `lora_rank: List[int]`, `run_eval: List[bool]` |
 | `inspect_queue` | Orchestration | Returns status of all queued, running, completed, and failed jobs. | `queue_dir: str = "mlx_runs"` |
 | `execute_queue` | Orchestration | Executes queued jobs sequentially (spawns macOS Terminal or headless). | `queue_dir: str = "mlx_runs"`, `spawn_terminal: bool = True` |
-| `run_test_evaluation` | Evaluation | Executes generative evaluation on `test.jsonl` and builds HTML dashboard. | `model`, `adapter_path`, `data_path`, `max_tokens: int = 128` |
-| `estimate_test_eval_throughput` | Evaluation | Computes model-dependent generation throughput (tok/s) and eval duration. | `model_name`, `total_samples: int = 50`, `num_passes: int = 2` |
-| `launch_lora_tui` | UI | Spawns interactive TUI directly in Mode 2 (Single Run) or Mode 3 (Multi-Run). | `mode: int = 2` (or `3`), `dataset_path`, `model`, `queue_dir` |
+| `run_test_evaluation` | Evaluation [Experimental] | Executes generative evaluation on `test.jsonl` and builds HTML dashboard. | `model`, `adapter_path`, `data_path`, `max_tokens: int = 128` |
+| `estimate_test_eval_throughput` | Evaluation [Experimental] | Computes model-dependent generation throughput (tok/s) and eval duration. | `model_name`, `total_samples: int = 50`, `num_passes: int = 2` |
+| `launch_lora_tui` | UI | Spawns interactive TUI directly in Mode 2 (Solo Runs) or Mode 3 (Multi-Run Matrix). | `mode: int = 2` (or `3`), `dataset_path`, `model`, `queue_dir` |
 
 ---
 

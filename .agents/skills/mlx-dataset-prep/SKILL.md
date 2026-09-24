@@ -1,6 +1,6 @@
 ---
 name: mlx-dataset-prep
-description: Prepare and convert Hugging Face datasets into Apple MLX format (mlx-lm), and orchestrate single-run and multi-run LoRA fine-tuning sweeps, resource estimation, VLM safeguards, and experimental generative test evaluations.
+description: Prepare and convert Hugging Face datasets into Apple MLX format (mlx-lm), and orchestrate solo runs and multi-run matrix sweeps, resource estimation, VLM safeguards, and experimental generative test evaluations.
 ---
 
 # MLX Commander: Agent Skill for Apple MLX Fine-Tuning Orchestration & Dataset Preparation
@@ -31,8 +31,8 @@ MLX Commander provides three dedicated operational modes accessible via TUI (`F2
 |---|---|---|
 | **Mode 1: Dataset Converter** | Ingest & standardize data | Schema auto-detection, multi-column concat (`+`), multi-file merging, 4 target MLX formats, reproducible seeds, manifest handshake. |
 | **Mode 2: Solo Runs** | Precision single-run tuning | 22+ explicit hyperparameters, VLM attention mask safeguards (`batch_size=1`, `grad_accum=N`), peak RAM & implied epochs estimation, validation loss milestones. |
-| **Mode 3: Fleet Sweeps** | Multi-run grid sweeps & queue | Single-line multi-condition syntax, Cartesian product grid expansion ($N_1 \times N_2 \dots$), sequential FIFO execution to prevent memory thrashing. |
-| **Evals: Test Set Generator** | Generative evaluation | Real token-by-token decoding on `test.jsonl`, physical memory-bandwidth speed model, Exact Match, Word F1, 2×2 Migration Matrix, offline HTML comparison dashboard, W&B tables. |
+| **Mode 3: Multi-Run Matrix** | Grid sweeps & batch queue | Single-line multi-condition syntax, Cartesian product grid expansion ($N_1 \times N_2 \dots$), sequential FIFO execution to prevent memory thrashing. |
+| **Evals: Test Set Generator [Experimental]** | Generative evaluation [Experimental] | Real token-by-token decoding on `test.jsonl`, physical memory-bandwidth speed model, Exact Match, Word F1, 2×2 Migration Matrix, offline HTML comparison dashboard, W&B tables. |
 
 ---
 
@@ -157,7 +157,7 @@ When `valid.jsonl` is present in the dataset directory, MLX Commander automatica
 
 ---
 
-### 3. Fleet Sweeps: Multi-Run Grid Sweeps & Queue Orchestration (Mode 3)
+### 3. Multi-Run Matrix: Grid Sweeps & Queue Orchestration (Mode 3)
 
 Mode 3 expands multi-condition sweeps into a visual Cartesian product grid and queues runs into a persistent FIFO queue (`mlx_runs/queue.json`).
 
@@ -196,7 +196,7 @@ python3 -m mlx_commander --run-queue ./mlx_runs
 
 ---
 
-### 4. Experimental Generative Evals on Test Sets
+### 4. Generative Test Set Evaluation Engine [Experimental]
 
 Standard `mlx_lm.lora --test` only computes cross-entropy loss and perplexity via teacher forcing—it never prompts the model to generate text.
 
@@ -262,6 +262,6 @@ MLX Commander provides an MCP tool suite over `stdio`. Agents can invoke these t
 | `queue_multi_run_sweep` | Expands hyperparameter sweep grid (Cartesian product) and enqueues all runs. | `model`, `data_path`, `learning_rate: List[float]`, `lora_rank: List[int]`, `batch_size: List[int]`, `run_eval: List[bool]`, `queue_dir` |
 | `inspect_queue` | Returns list of all pending, completed, and failed runs with config and log paths. | `queue_dir: str = "mlx_runs"` |
 | `execute_queue` | Runs the queue sequentially (spawns macOS Terminal or headless). | `queue_dir: str = "mlx_runs"`, `spawn_terminal: bool = True` |
-| `run_test_evaluation` | Executes post-training generative evaluation on `test.jsonl` and builds HTML dashboard. | `model`, `adapter_path`, `data_path`, `max_tokens: int = 128` |
-| `estimate_test_eval_throughput` | Computes model-dependent generation speed (tok/s) and evaluation duration. | `model_name`, `total_samples: int = 50`, `num_passes: int = 2` |
-| `launch_lora_tui` | Launches TUI directly in Mode 2 (Single Run) or Mode 3 (Multi-Run Sweeps). | `mode: int = 2` (or `3`), `dataset_path`, `model`, `queue_dir` |
+| `run_test_evaluation` | Executes post-training generative evaluation [Experimental] on `test.jsonl` and builds HTML dashboard. | `model`, `adapter_path`, `data_path`, `max_tokens: int = 128` |
+| `estimate_test_eval_throughput` | Computes model-dependent generation speed (tok/s) and evaluation duration [Experimental]. | `model_name`, `total_samples: int = 50`, `num_passes: int = 2` |
+| `launch_lora_tui` | Launches TUI directly in Mode 2 (Solo Runs) or Mode 3 (Multi-Run Matrix). | `mode: int = 2` (or `3`), `dataset_path`, `model`, `queue_dir` |
