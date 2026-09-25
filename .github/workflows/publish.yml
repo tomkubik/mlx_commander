@@ -8,7 +8,7 @@ on:
 
 permissions:
   id-token: write
-  contents: read
+  contents: write
 
 jobs:
   build-and-publish:
@@ -19,7 +19,7 @@ jobs:
       url: https://pypi.org/p/mlx_commander
     permissions:
       id-token: write  # Mandatory for PyPI Trusted Publishing (OIDC)
-      contents: read
+      contents: write  # Mandatory for creating GitHub Releases and tags
 
     steps:
       - name: Check out repository
@@ -57,4 +57,22 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
+
+      - name: Extract package version
+        id: pkg_info
+        run: |
+          VERSION=$(python3 -c "import re; print(re.search(r'__version__\s*=\s*[\"\\\']([^\"\\\']+)[\"\\\']', open('mlx_commander/__init__.py').read()).group(1))")
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.pkg_info.outputs.tag }}
+          name: "${{ steps.pkg_info.outputs.tag }}"
+          generate_release_notes: true
+          files: dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
