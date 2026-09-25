@@ -4,9 +4,9 @@ The orthodox commander style TUI, Headless CLI & Model Context Protocol (MCP) Su
 
 Built entirely in Python with zero mandatory dependencies and zero pre-compiled binaries.
 
-![MLX Commander – Screenshot 1](docs/images/screenshot1_main.jpg)
+![MLX Commander – Screenshot 1](docs/images/screenshot1_classic_blue.png)
 
-*Orthodox dual-panel TUI which makes Apple MLX hyperparameters and hardware defaults explicit*
+*Classic Blue theme (orthodox commander style) with full keyboard navigation and multi-mode support*
 
 ---
 
@@ -85,9 +85,9 @@ MLX Commander transforms your Apple Silicon Mac into an autonomous, crash-proof 
 | **Data Ingestion** | **🔄 MLX Dataset Prep (Mode 1)** | Converts Parquet/Arrow/JSONL/Hub to 4 MLX formats with auto-splits | Instant formatting with multi-column concat (`+`), reproducible seeds, and zero mandatory external libraries. |
 | **Autonomous Control** | **🤖 MCP Server** | 8 native tools for AI coding agents over stdio | Agents can evaluate RAM, configure sweeps, and run training queues without manual UI clicking. |
 
-![MLX Commander – Screenshot 2](docs/images/screenshot2_classic_blue.png)
+![MLX Commander – Screenshot 2](docs/images/screenshot2_classic_dark.jpg)
 
-*Classic Blue theme (orthodox commander style) with full keyboard navigation and multi-mode support*
+*Classic Dark theme which makes Apple MLX hyperparameters and hardware defaults explicit*
 
 ---
 
