@@ -1,4 +1,4 @@
-# MLX_Commander 🚀
+# MLX_Commander 👮
 
 The orthodox commander style TUI, Headless CLI & Model Context Protocol (MCP) Suite for Apple Silicon MLX Training Ops (Single Run & Multi-Run Matrix) and Hugging Face Dataset Preparation.
 
@@ -21,7 +21,7 @@ MLX Commander transforms your Apple Silicon Mac into an autonomous, crash-proof 
 │  1. DATASET CONVERSION   │  2. TRAINING OPS                │  3. GENERATIVE EVALS      │
 │     (Hugging Face → MLX) │     (Single Run & Matrix)       │     [EXPERIMENTAL]        │
 │  • Parquet / Arrow / Hub │  • 🎯 Single Run (22 params)    │  • 2-Pass Test Bench      │
-│  • Auto Train/Val/Test   │  • 🚀 Multi-Run Matrix (Grid)   │  • Bandwidth-based ETA    │
+│  • Auto Train/Val/Test   │  • 👮 Multi-Run Matrix (Grid)   │  • Bandwidth-based ETA    │
 │  • 4 Standard Formats    │  • FIFO Queue (Zero OOM Panics) │  • Exact Match & Word F1  │
 │  • Concat (+) & Merging  │  • VLM Attention-Mask Shield    │  • Offline HTML Dashboard │
 └──────────────────────────┴─────────────────────────────────┴───────────────────────────┘
@@ -37,7 +37,7 @@ MLX Commander transforms your Apple Silicon Mac into an autonomous, crash-proof 
   - **Live Validation Milestones**: Discovers `valid.jsonl` and streams validation loss checkpoints directly to the terminal (`★ [Validation Loss Milestone] Iter 100: Val loss = 1.234`).
   - **Implied Epochs Meter**: Computes dataset coverage with dark red warnings when $< 1.0$ epochs.
 
-- **🚀 Multi-Run Matrix (Mode 3)**:
+- **👮 Multi-Run Matrix (Mode 3)**:
   - **Effortless Experiment Planning & Scheduling**: Easily plan and schedule multiple fine-tuning experiments at once without writing brittle bash loops or custom runner scripts.
   - **Visual Cartesian Parameter Grid**: Enter single-line conditions (`Learning Rate: [ 1e-4 ] [ 2e-4 ]`, `LoRA Rank: [ 8 ] [ 16 ]`) to instantly generate an interactive $N_1 \times N_2 \dots$ sweep matrix with aggregate memory and duration estimates.
   - **Crash-Proof Sequential Queue (`--run-queue`)**: Protects Apple Silicon Unified Memory from OOM thrashing, swap exhaustion, and macOS kernel panics by strictly executing queued runs in sequential FIFO order.
@@ -80,7 +80,7 @@ MLX Commander transforms your Apple Silicon Mac into an autonomous, crash-proof 
 | Capability | Feature Name | What It Does | Why It Matters on Apple Silicon |
 |---|---|---|---|
 | **Training Ops** | **🎯 Single Run (Mode 2)** | 22 explicit MLX parameters, live validation milestones, implied epochs | Eliminates guesswork; pre-flight RAM estimator prevents OOM crashes; VLM safeguards prevent attention mask errors. |
-| **Training Ops** | **🚀 Multi-Run Matrix (Mode 3)** | Visual Cartesian grid ($N_1 \times N_2 \dots$), single-line conditions, FIFO queue | Easily plan and schedule multiple experiments without custom scripts; runs unattended while sequential queueing prevents Unified Memory crashes. |
+| **Training Ops** | **👮 Multi-Run Matrix (Mode 3)** | Visual Cartesian grid ($N_1 \times N_2 \dots$), single-line conditions, FIFO queue | Easily plan and schedule multiple experiments without custom scripts; runs unattended while sequential queueing prevents Unified Memory crashes. |
 | **Evaluation Engine** | **🧪 Generative Evals [Experimental]** | Real token decoding on `test.jsonl`, baseline comparison, 3-tier reports | Unlike perplexity, tests actual generative capability; physics-grounded speed model predicts exact duration. |
 | **Data Ingestion** | **🔄 MLX Dataset Prep (Mode 1)** | Converts Parquet/Arrow/JSONL/Hub to 4 MLX formats with auto-splits | Instant formatting with multi-column concat (`+`), reproducible seeds, and zero mandatory external libraries. |
 | **Autonomous Control** | **🤖 MCP Server** | 8 native tools for AI coding agents over stdio | Agents can evaluate RAM, configure sweeps, and run training queues without manual UI clicking. |
@@ -227,7 +227,7 @@ When `valid.jsonl` is present in the dataset folder, MLX Commander automatically
 
 ---
 
-## 🚀 Mode 3: Multi-Run Matrix
+## 👮 Mode 3: Multi-Run Matrix
 
 ![Multi run](docs/images/screenshot_multi_run.png)
 
