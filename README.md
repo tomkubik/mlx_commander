@@ -4,7 +4,7 @@ The orthodox commander style TUI, Headless CLI & Model Context Protocol (MCP) Su
 
 Built entirely in Python with zero mandatory dependencies and zero pre-compiled binaries.
 
-![Orthodox TUI which makes MLX defaults explicit](docs/images/screenshot1.png)
+![MLX Commander – Screenshot 1](docs/images/screenshot1_main.jpg)
 
 *Orthodox dual-panel TUI which makes Apple MLX hyperparameters and hardware defaults explicit*
 
@@ -85,6 +85,10 @@ MLX Commander transforms your Apple Silicon Mac into an autonomous, crash-proof 
 | **Data Ingestion** | **🔄 MLX Dataset Prep (Mode 1)** | Converts Parquet/Arrow/JSONL/Hub to 4 MLX formats with auto-splits | Instant formatting with multi-column concat (`+`), reproducible seeds, and zero mandatory external libraries. |
 | **Autonomous Control** | **🤖 MCP Server** | 8 native tools for AI coding agents over stdio | Agents can evaluate RAM, configure sweeps, and run training queues without manual UI clicking. |
 
+![MLX Commander – Screenshot 2](docs/images/screenshot2_classic_blue.png)
+
+*Classic Blue theme (orthodox commander style) with full keyboard navigation and multi-mode support*
+
 ---
 
 ## 📦 Quick Start
@@ -157,6 +161,8 @@ python3 -m mlx_commander --run-queue ./mlx_runs
 ---
 
 ## 🎛️ Mode 2: Single Run
+
+![Single run](docs/images/screenshot_single_run.png)
  
 Press **`[F2]`** inside the TUI or simply launch `mlx_commander` (default startup view) to enter **Single Run Mode**.
  
@@ -222,6 +228,8 @@ When `valid.jsonl` is present in the dataset folder, MLX Commander automatically
 ---
 
 ## 🚀 Mode 3: Multi-Run Matrix
+
+![Multi run](docs/images/screenshot_multi_run.png)
 
 Press **`[F2]`** inside the TUI or pass `--multi-run` from the command line to switch to **Multi-Run Matrix Mode**.
 
@@ -363,6 +371,8 @@ models/Llama-3.2-3B/adapters/
 ---
 
 ## 🔄 Mode 1: Dataset Preparation & Ingestion
+
+![Dataset converter](docs/images/screenshot_dataset_converter.jpg)
 
 Press **`[F2]`** to switch to **Dataset Converter Mode** (or launch via `mlx_commander --converter`).
 
