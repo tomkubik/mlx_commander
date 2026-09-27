@@ -4,7 +4,7 @@ The orthodox commander style TUI, Headless CLI & Model Context Protocol (MCP) Su
 
 Built entirely in Python with zero mandatory dependencies and zero pre-compiled binaries.
 
-![MLX Commander – Screenshot 1](docs/images/MLX_commander_walkthrough.gif)
+![MLX Commander – Screenshot 1](docs/images/MLX_Commander_walkthrough.gif)
 
 *Classic Blue theme (orthodox commander style) with full keyboard navigation and multi-mode support*
 
