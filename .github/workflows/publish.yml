@@ -61,7 +61,7 @@ jobs:
       - name: Extract package version
         id: pkg_info
         run: |
-          VERSION=$(python3 -c "import re; print(re.search(r'__version__\s*=\s*[\"\\\']([^\"\\\']+)[\"\\\']', open('mlx_commander/__init__.py').read()).group(1))")
+          VERSION=$(python3 -c "import mlx_commander; print(mlx_commander.__version__)")
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
 

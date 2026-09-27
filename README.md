@@ -4,9 +4,9 @@ The orthodox commander style TUI, Headless CLI & Model Context Protocol (MCP) Su
 
 Built entirely in Python with zero mandatory dependencies and zero pre-compiled binaries.
 
-![MLX Commander – Screenshot 1](docs/images/MLX_Commander_walkthrough.gif)
+![MLX Commander Walkthrough](docs/images/MLX_Commander_walkthrough.gif)
 
-*Classic Blue theme (orthodox commander style) with full keyboard navigation and multi-mode support*
+*Interactive walkthrough: Fine-tuning configuration, memory safety checks, queue runner, and dataset conversion on Apple Silicon*
 
 ---
 
@@ -43,7 +43,9 @@ MLX Commander transforms your Apple Silicon Mac into an autonomous, crash-proof 
   - **Crash-Proof Sequential Queue (`--run-queue`)**: Protects Apple Silicon Unified Memory from OOM thrashing, swap exhaustion, and macOS kernel panics by strictly executing queued runs in sequential FIFO order.
   - **Detached Execution**: Spawns jobs in a separate macOS `Terminal.app` window so you can close the TUI or step away while runs execute unattended.
 
-![MLX Commander – Screenshot 1](docs/images/MLX_commander_walkthrough.gif)
+![MLX Commander – Screenshot 1](docs/images/screenshot1_classic_blue.png)
+
+*Classic Blue theme (orthodox commander style) with full keyboard navigation and multi-mode support*
 
 ---
 
