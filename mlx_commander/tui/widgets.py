@@ -1813,7 +1813,7 @@ def draw_queue_table(
                 f"model={model_slug}",
                 f"iters={getattr(run, 'iters', 1000)}",
                 f"batch={getattr(run, 'batch_size', 4)}",
-                f"lr={getattr(run, 'learning_rate', 1e-5):g}",
+                f"lr={getattr(run, 'learning_rate', 2e-4):g}",
                 f"rank={getattr(run, 'lora_rank', 8)}",
                 f"alpha={getattr(run, 'lora_alpha', 16.0):g}",
                 f"layers={getattr(run, 'num_layers', 16)}",

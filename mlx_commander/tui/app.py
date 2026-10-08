@@ -954,7 +954,7 @@ def _draw_mode2_dashboard(
         (2, "Gradient Accumulation Steps", str(getattr(cfg, "grad_accumulation_steps", 1)), 8, False),
         (3, "Learning Rate", f"{cfg.learning_rate:g}", 12, False),
         (4, "LoRA Rank (r)", str(cfg.lora_rank), 8, False),
-        (5, "LoRA Alpha (α)", f"{cfg.lora_alpha:g}  → scale {cfg.effective_lora_scale():g}", 8, False),
+        (5, "LoRA Alpha (α)", f"{cfg.lora_alpha:g}  → scale {cfg.effective_lora_scale():g}", 18, False),
         (6, "LoRA Dropout", f"{cfg.lora_dropout:g}", 8, False),
         (7, "Max Seq Length", str(cfg.max_seq_length), 10, False),
         (8, "Fine-Tuned Layers", str(cfg.num_layers), 8, False),
@@ -1782,7 +1782,7 @@ def _handle_mode2_input(
                         state.update_deterministic_lora_name()
                     except ValueError: pass
             elif idx == 5:  # LoRA Alpha
-                val = show_text_edit_dialog(stdscr, "LoRA Alpha", f"PEFT alpha. Effective strength is alpha / rank, written to mlx-lm as scale (currently rank {state.lora_config.lora_rank}):", f"{state.lora_config.lora_alpha:g}")
+                val = show_text_edit_dialog(stdscr, "LoRA Alpha", f"Enter PEFT alpha (scale = alpha / rank, currently rank {state.lora_config.lora_rank}):", f"{state.lora_config.lora_alpha:g}")
                 if val:
                     try:
                         state.lora_config.lora_alpha = float(val)

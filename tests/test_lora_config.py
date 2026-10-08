@@ -126,3 +126,11 @@ class TestLoraConfig(unittest.TestCase):
         cfg_dropout = LoraRunConfig(lora_dropout=0.8)
         errors = cfg_dropout.validate()
         self.assertTrue(any("Dropout must be between 0.0 and 0.5" in e for e in errors))
+
+        cfg_alpha = LoraRunConfig(lora_alpha=0)
+        errors = cfg_alpha.validate()
+        self.assertTrue(any("LoRA alpha must be > 0" in e for e in errors))
+
+        cfg_rank = LoraRunConfig(lora_rank=0)
+        errors = cfg_rank.validate()
+        self.assertTrue(any("LoRA rank must be > 0" in e for e in errors))

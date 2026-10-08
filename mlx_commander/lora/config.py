@@ -489,6 +489,8 @@ class LoraRunConfig:
             errors.append("Learning rate must be > 0.")
         if self.lora_rank <= 0:
             errors.append("LoRA rank must be > 0.")
+        if self.lora_alpha <= 0:
+            errors.append("LoRA alpha must be > 0.")
         if self.num_layers <= 0:
             errors.append("Number of layers must be > 0.")
         if not (0.0 <= self.lora_dropout <= 0.5):
