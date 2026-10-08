@@ -124,7 +124,8 @@ class TestAdapterRenaming(unittest.TestCase):
         self.assertEqual(len(renamed), 1)
 
         renamed_path = renamed[0][1]
-        self.assertTrue(renamed_path.name.startswith("0000050_adapters_lora_r8_a16_"))
+        # adapter_config.json stores mlx-lm scale 16.0 at rank 8 -> PEFT alpha 128
+        self.assertTrue(renamed_path.name.startswith("0000050_adapters_lora_r8_a128_"))
         self.assertIn("Qwen2.5-7B-Instruct-4bit", renamed_path.name)
         self.assertTrue(step50.is_symlink())
 

@@ -56,7 +56,7 @@ class MultiLoraRunConfig:
     iters: List[int] = field(default_factory=lambda: [1000])
     batch_size: List[int] = field(default_factory=lambda: [4])
     grad_accumulation_steps: List[int] = field(default_factory=lambda: [1])
-    learning_rate: List[float] = field(default_factory=lambda: [1e-5])
+    learning_rate: List[float] = field(default_factory=lambda: [2e-4])
     lora_rank: List[int] = field(default_factory=lambda: [8])
     lora_alpha: List[float] = field(default_factory=lambda: [16.0])
     lora_dropout: List[float] = field(default_factory=lambda: [0.0])

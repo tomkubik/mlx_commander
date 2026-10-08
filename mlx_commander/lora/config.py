@@ -99,7 +99,7 @@ def generate_hyperparameters_slug(
         m_name = config.model
     else:
         method = (fine_tune_type or "lora").lower()
-        lr_val = learning_rate if learning_rate is not None else 1e-5
+        lr_val = learning_rate if learning_rate is not None else 2e-4
         r_val = rank if rank is not None else 8
         a_val = alpha if alpha is not None else 16.0
         b_val = batch_size if batch_size is not None else 4
@@ -214,9 +214,14 @@ class LoraRunConfig:
     optimizer: str = "adamw"
     iters: int = 1000
     batch_size: int = 4
-    learning_rate: float = 1e-5
+    # 2e-4 rather than mlx-lm's 1e-5: LoRA strength is roughly scale * lr, and
+    # alpha/rank now resolves to a small scale, so the old default barely moved
+    # the model over a typical run.
+    learning_rate: float = 2e-4
     num_layers: int = 16
     lora_rank: int = 8
+    # PEFT convention: effective strength is alpha / rank, resolved by
+    # effective_lora_scale() before being written to mlx-lm's `scale`.
     lora_alpha: float = 16.0
     lora_dropout: float = 0.0
     max_seq_length: int = 2048
@@ -261,6 +266,20 @@ class LoraRunConfig:
 
         if not self.adapter_path or self.adapter_path == "adapters":
             self.adapter_path = f"adapters/{self.name}"
+
+    def effective_lora_scale(self) -> float:
+        """
+        Resolve the PEFT-style (rank, alpha) pair into mlx-lm's `scale`.
+
+        mlx-lm applies `scale` directly: y + scale * (B @ A @ x). It never divides
+        by rank, whereas PEFT's alpha does. Since this tool exposes the familiar
+        rank/alpha pair, alpha is divided by rank here so that published LoRA
+        recipes ("rank 16, alpha 32") reproduce as written, and so that sweeping
+        rank at fixed alpha holds the effective strength constant.
+        """
+        if self.lora_rank <= 0:
+            return float(self.lora_alpha)
+        return float(self.lora_alpha) / float(self.lora_rank)
 
     def get_hyperparameters_slug(self, implied_epochs: Optional[float] = None) -> str:
         """Get the self-documenting hyperparameters slug for this run configuration."""
@@ -319,7 +338,7 @@ class LoraRunConfig:
                         pass
                 elif k == "scale":
                     try:
-                        data["lora_alpha"] = float(v)
+                        data["_mlx_scale"] = float(v)
                     except ValueError:
                         pass
                 elif k == "dropout":
@@ -354,6 +373,12 @@ class LoraRunConfig:
                     data[k] = v
                 else:
                     data[k] = v
+
+        # mlx-lm stores `scale`; recover the PEFT alpha this tool exposes.
+        mlx_scale = data.pop("_mlx_scale", None)
+        if mlx_scale is not None and "lora_alpha" not in data:
+            rank = data.get("lora_rank", cls.lora_rank)
+            data["lora_alpha"] = mlx_scale * rank if rank > 0 else mlx_scale
         return cls.from_dict(data)
 
     def to_mlx_yaml(self) -> str:
@@ -382,7 +407,8 @@ class LoraRunConfig:
             'lora_parameters:',
             f'  rank: {self.lora_rank}',
             f'  dropout: {self.lora_dropout}',
-            f'  scale: {self.lora_alpha}',
+            f'  # scale = alpha / rank = {self.lora_alpha:g} / {self.lora_rank}',
+            f'  scale: {self.effective_lora_scale():g}',
         ]
         if self.test:
             lines.append('test: true')

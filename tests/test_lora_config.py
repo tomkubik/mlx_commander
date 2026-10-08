@@ -15,7 +15,7 @@ class TestLoraConfig(unittest.TestCase):
         self.assertEqual(cfg.optimizer, "adamw")
         self.assertEqual(cfg.iters, 1000)
         self.assertEqual(cfg.batch_size, 4)
-        self.assertEqual(cfg.learning_rate, 1e-5)
+        self.assertEqual(cfg.learning_rate, 2e-4)
         self.assertEqual(cfg.lora_rank, 8)
         self.assertEqual(cfg.lora_alpha, 16.0)
         self.assertEqual(cfg.lora_dropout, 0.0)
@@ -55,7 +55,8 @@ class TestLoraConfig(unittest.TestCase):
         self.assertIn('learning_rate: 2e-05', yaml_str)
         self.assertIn('adapter_path: "adapters/custom_run"', yaml_str)
         self.assertIn('rank: 16', yaml_str)
-        self.assertIn('scale: 32.0', yaml_str)
+        # alpha 32 at rank 16 -> mlx-lm scale 2
+        self.assertIn('scale: 2', yaml_str)
 
     def test_to_cli_command(self):
         cfg = LoraRunConfig(

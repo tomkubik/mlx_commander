@@ -53,10 +53,13 @@ def rename_saved_adapters(
             with open(adir / "adapter_config.json", "r", encoding="utf-8") as acf:
                 ac_data = json.load(acf)
             lora_p = ac_data.get("lora_parameters", {})
+            _rank = lora_p.get("rank", 8)
+            # adapter_config.json holds mlx-lm's `scale`; convert back to PEFT alpha.
+            _scale = lora_p.get("scale", 2.0)
             config = LoraRunConfig(
                 model=ac_data.get("model", "model"),
-                lora_rank=lora_p.get("rank", 8),
-                lora_alpha=lora_p.get("scale", 16.0),
+                lora_rank=_rank,
+                lora_alpha=_scale * _rank if _rank else _scale,
                 lora_dropout=lora_p.get("dropout", 0.0),
             )
         except Exception:
