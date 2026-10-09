@@ -158,12 +158,11 @@ def build_confusion_matrix(
             if gt == pred:
                 correct_count += 1
         else:
-            # Check if gt is a substring in pred
-            matched_c = None
-            for c in unique_classes:
-                if c and c in pred:
-                    matched_c = c
-                    break
+            # Accept a class name appearing inside a longer answer, but only when
+            # exactly one class is mentioned. Taking the first match would score
+            # "positive, not negative" as negative purely because of sort order.
+            mentioned = [c for c in unique_classes if c and c in pred]
+            matched_c = mentioned[0] if len(mentioned) == 1 else None
             if matched_c:
                 matrix[gt][matched_c] += 1
                 if gt == matched_c:
