@@ -265,10 +265,17 @@ def run_inference_batch(
     max_tokens: int = 128,
     phase_label: str = "Evaluating",
     engine: Optional[str] = None,
+    allow_mock: bool = False,
 ) -> Tuple[List[str], float, float]:
     """
     Generate inference answers for prompts using mlx-lm or mlx-vlm with live milestone updates.
     Returns: (list_of_predictions, total_time_sec, tokens_per_sec)
+
+    If generation fails, the error is raised so the caller can mark the run failed.
+    Scored results must never contain placeholder answers: a crashed or partial run
+    would otherwise be indistinguishable from a genuinely poor model.
+
+    Set allow_mock=True only in tests, to substitute placeholder answers instead.
     """
     start_time = time.time()
     predictions: List[str] = []
@@ -351,7 +358,14 @@ def run_inference_batch(
         sys.stdout.flush()
 
     except Exception:
-        # Fallback for environments without MLX engine installed or mock testing
+        if not allow_mock:
+            # Never fabricate predictions: a failed or partial run must surface as a
+            # failure, not as a low score written to the leaderboard, JSON and W&B.
+            raise
+        # Explicitly requested placeholder answers (tests / environments without MLX).
+        # Reset first so a mid-run failure cannot stack real and placeholder answers.
+        predictions = []
+        total_tokens = 0
         for idx, item in enumerate(prompts, 1):
             p_text = item.get("prompt", str(item)) if isinstance(item, dict) else str(item)
             predictions.append(f"Answer for: {p_text[:30]}...")

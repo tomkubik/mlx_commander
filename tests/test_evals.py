@@ -332,6 +332,7 @@ class TestEvalStorageAndRunner(unittest.TestCase):
                 adapter_path=None,
                 prompts=prompts,
                 phase_label="1/2 Baseline",
+                allow_mock=True,
             )
         self.assertEqual(len(preds), 3)
         printed = out_buf.getvalue()
