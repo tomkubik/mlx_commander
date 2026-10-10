@@ -6,7 +6,7 @@ and aggregated runtime estimates (max peak RAM, total duration, min implied epoc
 
 import itertools
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from .config import EVAL_STRATEGY_FINAL, LoraRunConfig
 from .estimator import (
@@ -16,7 +16,12 @@ from .estimator import (
 )
 
 
+# The out-of-the-box model. Picking a model while this is the only entry replaces it
+# rather than appending, so a first pick does not leave the default behind.
+DEFAULT_SWEEP_MODEL = "mlx-community/Llama-3.2-3B-Instruct-4bit"
+
 SWEEP_FIELD_DEFS = [
+    ("model", "Model", str),
     ("iters", "Iterations", int),
     ("batch_size", "Batch Size", int),
     ("grad_accumulation_steps", "Gradient Accumulation Steps", int),
@@ -31,6 +36,7 @@ SWEEP_FIELD_DEFS = [
     ("save_every", "Save Every", int),
     ("steps_per_eval", 'Steps per "Eval" (validation loss)', int),
     ("run_eval", "Run evals on test set (experimental)", bool),
+    ("seed", "Seed", int),
 ]
 
 
@@ -39,14 +45,16 @@ class MultiLoraRunConfig:
     """Configuration for a multi-condition hyperparameter sweep producing multiple runs."""
 
     # Base settings common across runs
-    model: str = "mlx-community/Llama-3.2-3B-Instruct-4bit"
+    # model and seed are sweep dimensions, but stay assignable as plain scalars so
+    # the single-model pickers keep working; get_field_values() normalises either form.
+    model: Union[str, List[str]] = DEFAULT_SWEEP_MODEL
     data: str = "mlx_dataset"
     train: bool = True
     test: bool = False
     fine_tune_type: str = "lora"
     optimizer: str = "adamw"
     adapter_path: str = "adapters"
-    seed: int = 0
+    seed: Union[int, List[int]] = 0
     val_batches: int = 25
     engine: str = "mlx_lm"
     train_vision: bool = False
@@ -68,6 +76,12 @@ class MultiLoraRunConfig:
     steps_per_eval: List[int] = field(default_factory=lambda: [100])
     run_eval: List[bool] = field(default_factory=lambda: [False])
     eval_adapter_strategy: str = EVAL_STRATEGY_FINAL
+
+    @property
+    def primary_model(self) -> str:
+        """The first model in the sweep, for pickers and validation that need one string."""
+        vals = self.get_field_values("model")
+        return str(vals[0]) if vals else ""
 
     def get_field_values(self, field_name: str) -> List[Any]:
         """Get the list of values for a specific hyperparameter field."""
@@ -124,14 +138,14 @@ class MultiLoraRunConfig:
         for idx, comb in enumerate(product_combs, 1):
             comb_dict = dict(zip(field_keys, comb))
             cfg = LoraRunConfig(
-                model=self.model,
+                model=comb_dict["model"],
                 data=self.data,
                 train=self.train,
                 test=self.test,
                 fine_tune_type=self.fine_tune_type,
                 optimizer=self.optimizer,
                 adapter_path=self.adapter_path,
-                seed=self.seed,
+                seed=comb_dict["seed"],
                 val_batches=self.val_batches,
                 grad_accumulation_steps=comb_dict["grad_accumulation_steps"],
                 iters=comb_dict["iters"],

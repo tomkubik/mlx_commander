@@ -282,19 +282,19 @@ class TestMultiRunStateAndUI(unittest.TestCase):
         self.assertEqual(state.multi_active_panel, "right")
         self.assertEqual(state.multi_right_focus_idx, 0, "DOWN from bottom of selector pane must focus top row (0) of hyperparameter pane in Mode 3")
 
-        # 3. At bottom of right pane (14), press DOWN -> should go to sweep pane
-        state.multi_right_focus_idx = 14
+        # 3. At bottom of right pane (the action row), press DOWN -> should go to sweep pane
+        state.multi_right_focus_idx = len(SWEEP_FIELD_DEFS)
         win.reset_mock()
         win.getch.side_effect = [curses.KEY_DOWN, ord("q")]
         run_commander_tui(win, initial_state=state)
         self.assertEqual(state.multi_active_panel, "sweep", "DOWN from bottom of hyperparameter pane must focus sweep pane")
 
-        # 4. At sweep pane, press UP -> should go to right pane, bottom row (14)
+        # 4. At sweep pane, press UP -> should go to right pane, bottom (action) row
         win.reset_mock()
         win.getch.side_effect = [curses.KEY_UP, ord("q")]
         run_commander_tui(win, initial_state=state)
         self.assertEqual(state.multi_active_panel, "right")
-        self.assertEqual(state.multi_right_focus_idx, 14, "UP from sweep pane must focus bottom row (14) of hyperparameter pane")
+        self.assertEqual(state.multi_right_focus_idx, len(SWEEP_FIELD_DEFS), "UP from sweep pane must focus bottom row (14) of hyperparameter pane")
 
         # 5. At sweep pane, press DOWN -> should wrap to left pane, top row (0)
         state.multi_active_panel = "sweep"

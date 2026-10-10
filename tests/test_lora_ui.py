@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from mlx_commander.lora import LoraRunConfig, QueueManager
+from mlx_commander.lora.multi_config import SWEEP_FIELD_DEFS
 from mlx_commander.tui.app import run_commander_tui
 from mlx_commander.tui.state import CommanderState
 from mlx_commander.tui.widgets import (
@@ -548,7 +549,7 @@ class TestLoraUI(unittest.TestCase):
         state = CommanderState()
         state.active_tab = 2  # Mode 3: Multi-Run Matrix
         state.multi_active_panel = "right"
-        state.multi_right_focus_idx = 13  # Run evals on test set
+        state.multi_right_focus_idx = [f[0] for f in SWEEP_FIELD_DEFS].index("run_eval")
         self.assertEqual(state.multi_lora_config.run_eval, [False])
 
         # Press Enter (10) -> choice dialog, KEY_DOWN (1) -> min val loss, Enter (10) -> confirm, 'q' -> exit

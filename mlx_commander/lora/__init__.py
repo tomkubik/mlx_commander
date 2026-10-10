@@ -20,7 +20,7 @@ from .config import (
     generate_hyperparameters_slug,
     sanitize_model_slug,
 )
-from .multi_config import MultiLoraRunConfig, SWEEP_FIELD_DEFS
+from .multi_config import DEFAULT_SWEEP_MODEL, MultiLoraRunConfig, SWEEP_FIELD_DEFS
 from .estimator import (
     calculate_implied_epochs,
     estimate_duration,
@@ -63,6 +63,7 @@ __all__ = [
     "EVAL_STRATEGY_DISPLAY_MAP",
     "LoraRunConfig",
     "MultiLoraRunConfig",
+    "DEFAULT_SWEEP_MODEL",
     "SWEEP_FIELD_DEFS",
     "QueueManager",
     "rename_saved_adapters",

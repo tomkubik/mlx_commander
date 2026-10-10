@@ -44,7 +44,9 @@ from mlx_commander.lora import (
     LoraRunConfig,
     MultiLoraRunConfig,
     QueueManager,
+    DEFAULT_SWEEP_MODEL,
     SWEEP_FIELD_DEFS,
+    sanitize_model_slug,
 )
 from mlx_commander.terminal_spawner import (
     ensure_adequate_terminal_size,
@@ -1154,10 +1156,12 @@ def _draw_mode3_dashboard(
 
     # Field 0: Base Model
     m_focus = is_multi_left and state.multi_left_focus_idx == 0
-    model_disp = state.multi_lora_config.model or "None"
+    _m_vals = state.multi_lora_config.get_field_values("model")
+    model_disp = (f"{len(_m_vals)} models in sweep" if len(_m_vals) > 1
+                  else (state.multi_lora_config.primary_model or "None"))
     if len(model_disp) > left_w - 18:
         model_disp = "…" + model_disp[-(left_w - 19):]
-    draw_field(stdscr, 2, 2, "Base Model", model_disp, is_focused=m_focus, val_width=max(14, left_w - 18), has_dropdown=True, right_edge=left_right_edge)
+    draw_field(stdscr, 2, 2, "Add Model", model_disp, is_focused=m_focus, val_width=max(14, left_w - 18), has_dropdown=True, right_edge=left_right_edge)
 
     # Engine badge & Architecture specs
     meta = state.inspect_current_model()
@@ -1226,21 +1230,22 @@ def _draw_mode3_dashboard(
 
     # Multi-field definitions: (field_num, label, values_list, val_type, is_btn)
     multi_fields_def = [
-        (0, "Training Iterations", cfg.iters, int, False),
-        (1, "Batch Size", cfg.batch_size, int, False),
-        (2, "Gradient Accumulation Steps", cfg.grad_accumulation_steps, int, False),
-        (3, "Learning Rate", cfg.learning_rate, float, False),
-        (4, "LoRA Rank (r)", cfg.lora_rank, int, False),
-        (5, "LoRA Alpha (α)", cfg.lora_alpha, float, False),
-        (6, "LoRA Dropout", cfg.lora_dropout, float, False),
-        (7, "Max Seq Length", cfg.max_seq_length, int, False),
-        (8, "Fine-Tuned Layers", cfg.num_layers, int, False),
-        (9, "Grad Checkpoint", cfg.grad_checkpoint, bool, False),
-        (10, "Mask Prompt", cfg.mask_prompt, bool, False),
-        (11, "Save Every", cfg.save_every, int, False),
-        (12, 'Steps per "Eval" (validation loss)', cfg.steps_per_eval, int, False),
+        (0, "Model", [sanitize_model_slug(m) for m in cfg.get_field_values("model")], str, False),
+        (1, "Training Iterations", cfg.iters, int, False),
+        (2, "Batch Size", cfg.batch_size, int, False),
+        (3, "Gradient Accumulation Steps", cfg.grad_accumulation_steps, int, False),
+        (4, "Learning Rate", cfg.learning_rate, float, False),
+        (5, "LoRA Rank (r)", cfg.lora_rank, int, False),
+        (6, "LoRA Alpha (α)", cfg.lora_alpha, float, False),
+        (7, "LoRA Dropout", cfg.lora_dropout, float, False),
+        (8, "Max Seq Length", cfg.max_seq_length, int, False),
+        (9, "Fine-Tuned Layers", cfg.num_layers, int, False),
+        (10, "Grad Checkpoint", cfg.grad_checkpoint, bool, False),
+        (11, "Mask Prompt", cfg.mask_prompt, bool, False),
+        (12, "Save Every", cfg.save_every, int, False),
+        (13, 'Steps per "Eval" (validation loss)', cfg.steps_per_eval, int, False),
         (
-            13,
+            14,
             "Run evals on test set (experimental)",
             [EVAL_STRATEGY_DISPLAY_MAP.get(getattr(cfg, "eval_adapter_strategy", EVAL_STRATEGY_FINAL), "Yes")]
             if any(getattr(cfg, "run_eval", [False]))
@@ -1248,7 +1253,8 @@ def _draw_mode3_dashboard(
             bool,
             False,
         ),
-        (14, "+ Add Sweep to Queue (F6)", [], None, True),
+        (15, "Seed", cfg.get_field_values("seed"), int, False),
+        (16, "+ Add Sweep to Queue (F6)", [], None, True),
     ]
 
     # Handle smooth scrolling in right panel (conditions always visible when space permits)
@@ -1960,19 +1966,35 @@ def _handle_mode3_input(
         elif key in (10, 13, curses.KEY_ENTER, 32):  # Enter or Space
             idx = state.multi_left_focus_idx
             if idx == 0:  # Base Model
-                chosen = show_model_picker_dialog(stdscr, state.multi_lora_config.model)
+                chosen = show_model_picker_dialog(stdscr, state.multi_lora_config.primary_model)
                 if chosen:
                     from mlx_commander.lora.model_info import normalize_model_path
                     norm = normalize_model_path(chosen.strip())
-                    state.multi_lora_config.model = norm
+                    # Single Run still takes one model; the sweep takes a list.
                     state.lora_config.model = norm
+                    existing = list(state.multi_lora_config.get_field_values("model"))
+                    state.multi_lora_config.model = norm
                     meta = state.inspect_current_model(force=True)
                     if meta.is_valid and meta.path:
-                        state.multi_lora_config.model = meta.path
-                        state.lora_config.model = meta.path
+                        norm = meta.path
+                        state.lora_config.model = norm
+                    # Append rather than replace, so browsing the drive adds to the
+                    # sweep instead of silently discarding the models already listed.
+                    if norm in existing:
+                        merged = existing
+                        state.status_message = f"Already in the sweep: {sanitize_model_slug(norm)}"
+                    elif len(existing) == 1 and existing[0] == DEFAULT_SWEEP_MODEL:
+                        merged = [norm]
+                        state.status_message = f"Model set to: {sanitize_model_slug(norm)}"
+                    else:
+                        merged = existing + [norm]
+                        state.status_message = (
+                            f"Added {sanitize_model_slug(norm)} - {len(merged)} models in sweep "
+                            f"(edit the Model row to remove any)"
+                        )
+                    state.multi_lora_config.set_field_values("model", merged)
                     state.update_deterministic_lora_name()
                     state.clear_estimates_cache()
-                    state.status_message = f"Base model set to: {state.multi_lora_config.model}"
                     state.status_is_error = False
                     if getattr(meta, "engine", "mlx_lm") == "mlx_vlm":
                         from mlx_commander.lora.model_info import is_engine_installed
@@ -2041,7 +2063,7 @@ def _handle_mode3_input(
                 state.multi_active_panel = "left"
                 state.multi_left_focus_idx = 5
         elif key in (curses.KEY_DOWN, ord("j")):
-            if state.multi_right_focus_idx < 14:
+            if state.multi_right_focus_idx < len(SWEEP_FIELD_DEFS):
                 state.multi_right_focus_idx += 1
             else:
                 state.multi_active_panel = "sweep"
@@ -2049,7 +2071,7 @@ def _handle_mode3_input(
             state.multi_active_panel = "left"
         elif key in (10, 13, curses.KEY_ENTER, 32):  # Enter or Space
             idx = state.multi_right_focus_idx
-            if idx < 14:
+            if idx < len(SWEEP_FIELD_DEFS):
                 field_name, field_label, field_type = SWEEP_FIELD_DEFS[idx]
                 if field_name == "run_eval":
                     choice_labels = [label for _, label in EVAL_STRATEGY_CHOICES]
@@ -2094,12 +2116,16 @@ def _handle_mode3_input(
                                 prompt_vlm_sweep_batch_tweak(stdscr, state.multi_lora_config)
                         state.status_message = f"Updated {field_label} conditions: {state.multi_lora_config.get_field_values(field_name)}"
                         state.status_is_error = False
-            elif idx == 14:  # Add sweep to queue
-                if validate_lora_queue_preconditions(stdscr, state.multi_lora_config.model, state.multi_lora_config.data, multi_config=state.multi_lora_config):
+            elif idx == len(SWEEP_FIELD_DEFS):  # Add sweep to queue
+                if validate_lora_queue_preconditions(stdscr, state.multi_lora_config.primary_model, state.multi_lora_config.data, multi_config=state.multi_lora_config):
                     from mlx_commander.lora.model_info import normalize_model_path
-                    healed = normalize_model_path(state.multi_lora_config.model)
-                    if healed and Path(healed).exists():
-                        state.multi_lora_config.model = healed
+                    healed_models = []
+                    for _m in state.multi_lora_config.get_field_values("model"):
+                        _h = normalize_model_path(_m)
+                        healed_models.append(_h if _h and Path(_h).exists() else _m)
+                    state.multi_lora_config.model = (
+                        healed_models[0] if len(healed_models) == 1 else healed_models
+                    )
                     added = state.add_multi_lora_runs_to_queue()
                     state.status_message = f"Added {len(added)} sweep run(s) to queue ({len(state.queue_manager.runs)} total queued)."
                     state.status_is_error = False
@@ -2108,7 +2134,7 @@ def _handle_mode3_input(
     elif state.multi_active_panel == "sweep":
         if key in (curses.KEY_UP, ord("k")):
             state.multi_active_panel = "right"
-            state.multi_right_focus_idx = 14
+            state.multi_right_focus_idx = len(SWEEP_FIELD_DEFS)
         elif key in (curses.KEY_DOWN, ord("j")):
             state.multi_active_panel = "left"
             state.multi_left_focus_idx = 0

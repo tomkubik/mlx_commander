@@ -97,6 +97,7 @@ def generate_hyperparameters_slug(
         gas_val = getattr(config, "grad_accumulation_steps", 1)
         i_val = config.iters
         m_name = config.model
+        seed_val = getattr(config, "seed", 0)
     else:
         method = (fine_tune_type or "lora").lower()
         lr_val = learning_rate if learning_rate is not None else 2e-4
@@ -106,6 +107,7 @@ def generate_hyperparameters_slug(
         gas_val = grad_accumulation_steps if grad_accumulation_steps is not None else 1
         i_val = iters if iters is not None else 1000
         m_name = model_name or "model"
+        seed_val = 0
 
     lr_str = format_learning_rate(lr_val)
     model_slug = sanitize_model_slug(m_name)
@@ -120,6 +122,10 @@ def generate_hyperparameters_slug(
     if gas_val and gas_val > 1:
         parts.append(f"gas{gas_val}")
     parts.append(f"i{i_val}")
+    # Only when the seed is not the default, so existing run names are unchanged while
+    # repeated-seed runs stay distinguishable in adapter filenames.
+    if seed_val:
+        parts.append(f"s{seed_val}")
     if implied_epochs is not None and implied_epochs > 0:
         parts.append(f"ep{implied_epochs:.1f}".replace(".", "p"))
     parts.append(model_slug)

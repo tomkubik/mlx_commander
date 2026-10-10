@@ -714,6 +714,32 @@ def draw_multi_field(
     total_w = sum(len(b) for b in box_strs) + (len(box_strs) - 1)
     if right_edge is not None:
         min_x = x + len(lbl)
+        avail = right_edge - min_x + 1
+        # Long values (model ids, paths) can overrun the panel. Shrink to fit rather
+        # than drawing past the border: trim each box first, and if even that will not
+        # fit, collapse the row to a count and leave the detail to the edit dialog.
+        if avail > 0 and total_w > avail:
+            n = len(box_strs)
+            per = (avail - (n - 1)) // n
+            # Trim only while the values stay readable. Below about a dozen visible
+            # characters they stop being distinguishable ("Mistra…" next to
+            # "Phi-3.…"), so collapse to a count instead; the full list is in the
+            # edit dialog and the sweep grid. On a 120-column terminal this lists up
+            # to three model ids and collapses from the fourth, while short values
+            # such as seeds are never affected.
+            if per >= 15:
+                trimmed = []
+                for b in box_strs:
+                    inner = b.strip()
+                    if len(inner) + 2 > per:
+                        inner = inner[: max(1, per - 3)] + "…"
+                    trimmed.append(f" {inner} ")
+                box_strs = trimmed
+            else:
+                noun = label.lower().rstrip(":").strip()
+                noun = noun if noun.endswith("s") else f"{noun}s"
+                box_strs = [f" {n} {noun} "]
+            total_w = sum(len(b) for b in box_strs) + (len(box_strs) - 1)
         val_x = max(min_x, right_edge - total_w + 1)
     else:
         val_x = x + len(lbl)
