@@ -172,11 +172,44 @@ def build_confusion_matrix(
 
     accuracy = round((correct_count / len(ground_truths)) * 100.0, 2)
 
+    # Per-class precision/recall/F1 from the matrix, then the unweighted mean.
+    # Macro-F1 gives a rare class the same weight as a common one, so a model that
+    # scores well overall by neglecting a minority class cannot hide behind accuracy.
+    per_class: Dict[str, Dict[str, float]] = {}
+    for c in unique_classes:
+        tp = matrix[c].get(c, 0)
+        support = sum(matrix[c].values())
+        predicted_as_c = sum(matrix[g].get(c, 0) for g in unique_classes)
+        precision = tp / predicted_as_c if predicted_as_c else 0.0
+        recall = tp / support if support else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+        per_class[c] = {
+            "support": support,
+            "precision": round(precision * 100.0, 2),
+            "recall": round(recall * 100.0, 2),
+            "f1": round(f1 * 100.0, 2),
+        }
+    macro_f1 = round(sum(v["f1"] for v in per_class.values()) / len(unique_classes), 2)
+
+    # Always answering the most common label. Accuracy is uninterpretable without
+    # it: on a split that is 60% one class, 60% is the score for understanding nothing.
+    gt_counts = Counter(norm_gt)
+    majority_label, majority_n = gt_counts.most_common(1)[0]
+    majority_baseline = round((majority_n / len(ground_truths)) * 100.0, 2)
+
+    unclassified = sum(matrix[c].get("other", 0) for c in unique_classes)
+
     return {
         "is_categorical": True,
         "classes": unique_classes,
         "matrix": matrix,
         "accuracy": accuracy,
+        "macro_f1": macro_f1,
+        "per_class": per_class,
+        "majority_label": majority_label,
+        "majority_baseline": majority_baseline,
+        "accuracy_over_baseline": round(accuracy - majority_baseline, 2),
+        "unclassified": unclassified,
         "total_samples": len(ground_truths),
     }
 
@@ -269,6 +302,32 @@ def format_cli_categorical_confusion_matrix(cm: Optional[Dict[str, Any]]) -> str
     accuracy = cm.get("accuracy", 0.0)
     total_samples = cm.get("total_samples", 0)
     lines.append(f"  • Categorical Accuracy: {accuracy:.1f}% ({total_samples} samples across {len(classes)} classes)")
+
+    macro_f1 = cm.get("macro_f1")
+    if macro_f1 is not None:
+        lines.append(f"  • Macro-F1 (classes weighted equally): {macro_f1:.1f}%")
+    baseline = cm.get("majority_baseline")
+    if baseline is not None:
+        delta = cm.get("accuracy_over_baseline", accuracy - baseline)
+        sign = "+" if delta >= 0 else ""
+        lines.append(
+            f"  • Majority baseline:    {baseline:.1f}%  "
+            f"(always '{cm.get('majority_label', '')}')   → {sign}{delta:.1f} pp over baseline"
+        )
+    unclassified = cm.get("unclassified")
+    if unclassified:
+        lines.append(f"  • Unclassified answers: {unclassified} (no single class named)")
+
+    per_class = cm.get("per_class") or {}
+    if per_class:
+        lines.append("")
+        lines.append(f"  {'class':<{label_w}}{'support':>9}{'precision':>11}{'recall':>9}{'F1':>8}")
+        for c in classes:
+            pc = per_class.get(c, {})
+            lines.append(
+                f"  {c:<{label_w}}{pc.get('support', 0):>9}"
+                f"{pc.get('precision', 0.0):>10.1f}%{pc.get('recall', 0.0):>8.1f}%{pc.get('f1', 0.0):>7.1f}%"
+            )
     lines.append("======================================================================")
     return "\n".join(lines)
 
