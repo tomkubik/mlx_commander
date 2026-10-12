@@ -274,6 +274,40 @@ def prompt_vlm_batch_tweak(stdscr: Optional[curses.window], config: Any) -> bool
     return False
 
 
+def _layers_prompt(state: Any) -> str:
+    """Edit-dialog prompt for Fine-Tuned Layers, naming this model's range when known."""
+    depth = getattr(getattr(state, "current_model_metadata", None), "num_layers", None)
+    if depth and depth > 0:
+        return (
+            f"Top layers to adapt, 1 to {depth} for this model, or -1 for every layer. "
+            f"-1 keeps the proportion equal across models of different depth."
+        )
+    return "Top layers to adapt (e.g. 16), or -1 for every layer."
+
+
+def format_layers_display(num_layers: Any, model_depth: Optional[int]) -> str:
+    """
+    Render the Fine-Tuned Layers value with what it means for the selected model.
+
+    The percentage is of that model's own depth, so the same count reads differently
+    on a deeper model. Without a depth there is nothing to take a percentage of, so
+    the field says where the figure will come from instead of guessing.
+    """
+    try:
+        n = int(num_layers)
+    except (TypeError, ValueError):
+        return str(num_layers)
+
+    if not model_depth or model_depth <= 0:
+        # -1 means every layer whatever the model, so it needs no depth to be clear.
+        return "-1  (all layers)" if n == -1 else f"{n}  (% shown once a model is selected)"
+    if n == -1:
+        return f"-1  (all {model_depth} layers)"
+    if n > model_depth:
+        return f"{n}  (exceeds {model_depth} layers)"
+    return f"{n}  ({round(n / model_depth * 100)}% of {model_depth})"
+
+
 def prompt_vlm_sweep_batch_tweak(stdscr: Optional[curses.window], multi_config: Any) -> bool:
     """
     Prompt user with an interactive suggestion dialog to tweak multi-run batch_size
@@ -408,6 +442,40 @@ def validate_lora_queue_preconditions(
             f"Note: mlx-vlm requires Python 3.10+.",
         )
         return False
+
+    # 3b. Layer count must fit every model in the run or sweep. mlx-lm raises
+    # "Requested to train N layers but the model only has M layers", so a run queued
+    # with too many layers fails once training starts rather than at setup.
+    layer_specs: List[Any] = []
+    models_to_check: List[str] = []
+    if multi_config is not None:
+        layer_specs = list(multi_config.get_field_values("num_layers"))
+        models_to_check = [str(m) for m in multi_config.get_field_values("model")]
+    elif config is not None:
+        layer_specs = [getattr(config, "num_layers", 16)]
+        models_to_check = [model_path.strip()]
+
+    for m_name in models_to_check:
+        m_meta = inspect_local_model(m_name)
+        depth = getattr(m_meta, "num_layers", None)
+        if not depth or depth <= 0:
+            continue  # not downloaded yet; mlx-lm will check at run time
+        for spec in layer_specs:
+            try:
+                n_layers = int(spec)
+            except (TypeError, ValueError):
+                continue
+            if n_layers > depth:
+                show_error_dialog(
+                    stdscr,
+                    "Too Many Layers",
+                    f"Fine-Tuned Layers is set to {n_layers}, but this model has "
+                    f"only {depth} layers:\n\n"
+                    f"  {m_name}\n\n"
+                    f"Use a value between 1 and {depth}, or -1 to adapt every layer "
+                    f"(which works across models of different depth).",
+                )
+                return False
 
     # 4. Dataset engine compatibility and schema consistency
     is_valid_ds, ds_err = validate_dataset_for_engine(data_p, engine)
@@ -950,6 +1018,7 @@ def _draw_mode2_dashboard(
     field_start_y = 2
     inner_h = max(1, panel_h - 2)
 
+    _model_depth = getattr(getattr(state, "current_model_metadata", None), "num_layers", None)
     fields_def = [
         (0, "Training Iterations", str(cfg.iters), 10, False),
         (1, "Batch Size", str(cfg.batch_size), 8, False),
@@ -959,7 +1028,7 @@ def _draw_mode2_dashboard(
         (5, "LoRA Alpha (α)", f"{cfg.lora_alpha:g}  → scale {cfg.effective_lora_scale():g}", 18, False),
         (6, "LoRA Dropout", f"{cfg.lora_dropout:g}", 8, False),
         (7, "Max Seq Length", str(cfg.max_seq_length), 10, False),
-        (8, "Fine-Tuned Layers", str(cfg.num_layers), 8, False),
+        (8, "Fine-Tuned Layers", format_layers_display(cfg.num_layers, _model_depth), 24, False),
         (9, "Grad Checkpoint", "True" if cfg.grad_checkpoint else "False", 10, False),
         (10, "Mask Prompt", "True" if cfg.mask_prompt else "False", 10, False),
         (11, "Save Every", str(cfg.save_every), 8, False),
@@ -1805,9 +1874,9 @@ def _handle_mode2_input(
                     try: state.lora_config.max_seq_length = max(64, int(val))
                     except ValueError: pass
             elif idx == 8:  # Num Layers
-                val = show_text_edit_dialog(stdscr, "LoRA Fine-Tuned Layers", "Enter number of top layers to adapt (e.g. 16):", str(state.lora_config.num_layers), is_number=True)
+                val = show_text_edit_dialog(stdscr, "LoRA Fine-Tuned Layers", _layers_prompt(state), str(state.lora_config.num_layers), is_number=True)
                 if val:
-                    try: state.lora_config.num_layers = max(1, int(val))
+                    try: state.lora_config.num_layers = -1 if int(val) == -1 else max(1, int(val))
                     except ValueError: pass
             elif idx == 9:  # Grad Checkpoint
                 state.lora_config.grad_checkpoint = not state.lora_config.grad_checkpoint

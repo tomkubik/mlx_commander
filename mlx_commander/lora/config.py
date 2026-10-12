@@ -224,6 +224,9 @@ class LoraRunConfig:
     # alpha/rank now resolves to a small scale, so the old default barely moved
     # the model over a typical run.
     learning_rate: float = 2e-4
+    # Top layers to adapt, or -1 for every layer. -1 is portable across models of
+    # different depth; a fixed count is not, so it only means the same thing when a
+    # single model is being trained.
     num_layers: int = 16
     lora_rank: int = 8
     # PEFT convention: effective strength is alpha / rank, resolved by
@@ -272,6 +275,17 @@ class LoraRunConfig:
 
         if not self.adapter_path or self.adapter_path == "adapters":
             self.adapter_path = f"adapters/{self.name}"
+
+    def resolved_num_layers(self, model_depth: Optional[int] = None) -> Optional[int]:
+        """
+        How many layers this run actually adapts.
+
+        -1 means every layer, which is only a concrete number once the model's depth
+        is known; without it there is nothing to resolve, so this returns None.
+        """
+        if self.num_layers == -1:
+            return int(model_depth) if model_depth and model_depth > 0 else None
+        return int(self.num_layers)
 
     def effective_lora_scale(self) -> float:
         """
@@ -497,8 +511,8 @@ class LoraRunConfig:
             errors.append("LoRA rank must be > 0.")
         if self.lora_alpha <= 0:
             errors.append("LoRA alpha must be > 0.")
-        if self.num_layers <= 0:
-            errors.append("Number of layers must be > 0.")
+        if self.num_layers == 0 or self.num_layers < -1:
+            errors.append("Number of layers must be > 0, or -1 for every layer.")
         if not (0.0 <= self.lora_dropout <= 0.5):
             errors.append("Dropout must be between 0.0 and 0.5.")
         if self.max_seq_length < 64:

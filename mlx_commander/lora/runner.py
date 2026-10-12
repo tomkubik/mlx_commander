@@ -225,6 +225,19 @@ def execute_single_run(
         mgr.update_run_status(run_id, "failed", exit_code=1, error_message=err_msg)
         return 1
 
+    # -1 adapts every layer, which is a different count per model. Report the number
+    # so the log records what was actually trained rather than just the intent.
+    if getattr(r, "num_layers", 16) == -1:
+        try:
+            from .model_info import inspect_local_model
+            _depth = getattr(inspect_local_model(r.model), "num_layers", None)
+        except Exception:
+            _depth = None
+        if _depth:
+            print(f"  [Layers]    -1 -> all {_depth} layers in {r.model}")
+        else:
+            print(f"  [Layers]    -1 -> all layers (depth of {r.model} not readable here)")
+
     # Initialize Weights & Biases tracking if enabled and authenticated
     tracker = WandbTracker(project=wandb_project or r.wandb_project, enabled=enable_wandb)
     tracker.start_run(r)

@@ -156,7 +156,17 @@ def estimate_peak_memory(config: LoraRunConfig, total_ram_bytes: Optional[int] =
 
     # 2. LoRA weights & Optimizer memory (GB)
     # Trainable params scale with rank and layers
-    effective_layers = config.num_layers if config.num_layers > 0 else 32
+    # -1 means every layer, which is only a number once the model's depth is known.
+    # Read it from the model when we can; 32 is a typical fallback for an estimate.
+    effective_layers = config.num_layers
+    if effective_layers is None or effective_layers <= 0:
+        effective_layers = None
+        try:
+            from .model_info import inspect_local_model
+            effective_layers = getattr(inspect_local_model(config.model), "num_layers", None)
+        except Exception:
+            effective_layers = None
+        effective_layers = effective_layers if effective_layers and effective_layers > 0 else 32
     lora_params_m = 2 * config.lora_rank * 4096 * effective_layers * 4 / 1_000_000
     # AdamW stores 2 states (8 bytes) + gradients (4 bytes) in fp32
     lora_opt_gb = max(0.1, (lora_params_m * 12) / 1024)
