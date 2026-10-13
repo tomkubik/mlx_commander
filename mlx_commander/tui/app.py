@@ -278,10 +278,9 @@ def _layers_prompt(state: Any) -> str:
     """Edit-dialog prompt for Fine-Tuned Layers, naming this model's range when known."""
     depth = getattr(getattr(state, "current_model_metadata", None), "num_layers", None)
     if depth and depth > 0:
-        return (
-            f"Top layers to adapt, 1 to {depth} for this model, or -1 for every layer. "
-            f"-1 keeps the proportion equal across models of different depth."
-        )
+        # show_text_edit_dialog hard-truncates at the dialog width (82 chars at most,
+        # fewer on a narrow terminal), so keep this short enough to survive it.
+        return f"Top layers to adapt: 1 to {depth}, or -1 for every layer."
     return "Top layers to adapt (e.g. 16), or -1 for every layer."
 
 
@@ -290,8 +289,9 @@ def format_layers_display(num_layers: Any, model_depth: Optional[int]) -> str:
     Render the Fine-Tuned Layers value with what it means for the selected model.
 
     The percentage is of that model's own depth, so the same count reads differently
-    on a deeper model. Without a depth there is nothing to take a percentage of, so
-    the field says where the figure will come from instead of guessing.
+    on a deeper model. The depth comes from the model's own config, which is only
+    readable once the model is on disk, so a Hub id that has not been downloaded has
+    no depth yet. Say which of the two is missing rather than guessing a number.
     """
     try:
         n = int(num_layers)
@@ -300,7 +300,12 @@ def format_layers_display(num_layers: Any, model_depth: Optional[int]) -> str:
 
     if not model_depth or model_depth <= 0:
         # -1 means every layer whatever the model, so it needs no depth to be clear.
-        return "-1  (all layers)" if n == -1 else f"{n}  (% shown once a model is selected)"
+        if n == -1:
+            return "-1  (all layers)"
+        # One message for both cases: the depth comes from the model's own config, so
+        # it needs a model that is on disk. Saying "once a model is selected" would be
+        # a promise that selecting a not-yet-downloaded model does not keep.
+        return f"{n}  (% once model is downloaded)"
     if n == -1:
         return f"-1  (all {model_depth} layers)"
     if n > model_depth:
@@ -1028,7 +1033,7 @@ def _draw_mode2_dashboard(
         (5, "LoRA Alpha (α)", f"{cfg.lora_alpha:g}  → scale {cfg.effective_lora_scale():g}", 18, False),
         (6, "LoRA Dropout", f"{cfg.lora_dropout:g}", 8, False),
         (7, "Max Seq Length", str(cfg.max_seq_length), 10, False),
-        (8, "Fine-Tuned Layers", format_layers_display(cfg.num_layers, _model_depth), 24, False),
+        (8, "Fine-Tuned Layers", format_layers_display(cfg.num_layers, _model_depth), 36, False),
         (9, "Grad Checkpoint", "True" if cfg.grad_checkpoint else "False", 10, False),
         (10, "Mask Prompt", "True" if cfg.mask_prompt else "False", 10, False),
         (11, "Save Every", str(cfg.save_every), 8, False),
