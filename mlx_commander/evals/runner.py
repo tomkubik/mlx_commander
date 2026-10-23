@@ -300,6 +300,16 @@ def run_inference_batch(
             import mlx_lm
             model, tokenizer = mlx_lm.load(model_name, adapter_path=adapter_arg)
 
+        # Score greedily, and say so rather than relying on the library default.
+        # Sampling would make the same checkpoint score differently on a re-run, and
+        # a default is not a guarantee: it can change between mlx-lm versions.
+        sampler = None
+        try:
+            from mlx_lm.sample_utils import make_sampler
+            sampler = make_sampler(temp=0.0)
+        except Exception:
+            sampler = None
+
         tok = tokenizer or getattr(processor, "tokenizer", None) or processor
 
         for idx, item in enumerate(prompts, 1):
@@ -315,12 +325,14 @@ def run_inference_batch(
                 )
             else:
                 import mlx_lm
+                gen_kwargs = {"sampler": sampler} if sampler is not None else {}
                 resp = mlx_lm.generate(
                     model=model,
                     tokenizer=tokenizer,
                     prompt=formatted_p,
                     max_tokens=max_tokens,
                     verbose=False,
+                    **gen_kwargs,
                 )
             ans = clean_generation_answer(resp)
             predictions.append(ans)
