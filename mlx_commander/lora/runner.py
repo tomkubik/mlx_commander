@@ -326,7 +326,14 @@ def execute_single_run(
                     hint = f"\n  [MLX Commander Hint] {engine} could not find model '{r.model}' on disk and attempted to download it from Hugging Face Hub.\n"
                     sys.stdout.write(hint)
                     lf.write(hint)
-                if "save" in line.lower() or "saved" in line.lower() or "iter" in line.lower():
+                # Only when a checkpoint was actually written. mlx-lm reports a save
+                # as "save  0000100_adapters.safetensors", so require both the verb
+                # and the file. This used to fire on any line containing "iter" -
+                # every progress line - so the adapter directory was rescanned
+                # hundreds of times per run and a rename could begin while mlx-lm
+                # was still writing the file.
+                _line_low = line.lower()
+                if "save" in _line_low and ".safetensors" in _line_low:
                     try:
                         new_renamed = rename_saved_adapters(r.adapter_path, r)
                         for orig, dest in new_renamed:
