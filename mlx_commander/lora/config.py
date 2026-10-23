@@ -60,12 +60,16 @@ def sanitize_model_slug(model_name: str) -> str:
 
 
 def format_learning_rate(lr: float) -> str:
-    """Format learning rate cleanly without decimal points for file names (e.g. 1e-5)."""
-    s = f"{lr:g}"
-    if "e" in s.lower():
-        base, exp = re.split(r"[eE]", s)
-        return f"{base}e{int(exp)}".replace(".", "p")
-    return s.replace(".", "p")
+    """
+    Format a learning rate for file names, always in exponent form (e.g. 1e-5, 2e-4).
+
+    %g only switches to exponent form below 1e-4, so a sweep straddling that boundary
+    produced two spellings of the same kind of number - lr7e-5 next to lr0p0002 - which
+    makes run directories awkward to sort and to parse back into a results table.
+    """
+    mantissa, exponent = f"{lr:.6e}".split("e")
+    mantissa = mantissa.rstrip("0").rstrip(".") or "0"
+    return f"{mantissa}e{int(exponent)}".replace(".", "p")
 
 
 def generate_hyperparameters_slug(

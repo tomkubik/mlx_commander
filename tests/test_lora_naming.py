@@ -20,12 +20,13 @@ class TestLoraNaming(unittest.TestCase):
         self.assertEqual(sanitize_model_slug(""), "model")
 
     def test_format_learning_rate(self):
+        # Always exponent form, so a sweep spanning 1e-4 does not mix two spellings.
         self.assertEqual(format_learning_rate(1e-5), "1e-5")
-        self.assertEqual(format_learning_rate(2e-4), "0p0002")
-        self.assertEqual(format_learning_rate(0.0002), "0p0002")
+        self.assertEqual(format_learning_rate(2e-4), "2e-4")
+        self.assertEqual(format_learning_rate(0.0002), "2e-4")
         self.assertEqual(format_learning_rate(0.00001), "1e-5")
-        self.assertEqual(format_learning_rate(0.001), "0p001")
-        self.assertEqual(format_learning_rate(1.5e-4), "0p00015")
+        self.assertEqual(format_learning_rate(0.001), "1e-3")
+        self.assertEqual(format_learning_rate(1.5e-4), "1p5e-4")
 
     def test_generate_deterministic_run_name(self):
         # Format: {index:02d}_{method}_r{rank}_a{alpha}_lr{lr}_b{batch}_i{iters}_{model_slug}
