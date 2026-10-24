@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 from .config import LoraRunConfig, format_adapter_filename
 from .model_info import (
@@ -128,6 +128,72 @@ def rename_saved_adapters(
     return renamed
 
 
+def probe_mlx_lm_loss_mask(loss_fn: Optional[Any] = None) -> Optional[int]:
+    """
+    Ask mlx-lm's loss function how many positions it grades, and compare with how many
+    it should grade.
+
+    mlx-lm builds its loss mask with ``steps <= lengths``, which reaches one position
+    past the last real token - the first slot of padding. Padding is zero, so every
+    example also teaches the model to predict token 0 after the answer, and validation
+    loss carries that position's error. It hurts most when answers are short: one
+    bewildering position averaged against two or three good ones.
+
+    Probed by behaviour rather than by reading the source, so renaming or reformatting
+    upstream cannot make this quietly report "no bug".
+
+    Returns the number of extra positions graded (1 when the bug is present, 0 when
+    not), or None when it cannot be determined - mlx not installed, internals moved.
+    """
+    try:
+        try:
+            import mlx.core as mx
+        except Exception:
+            mx = None
+        import numpy as np
+
+        if loss_fn is None:
+            from mlx_lm.tuner.trainer import default_loss as loss_fn
+            if mx is None:
+                return None
+
+        # One row: tokens 0..4 are real, the answer starts at 2, padded out to 9.
+        # Targets are batch[:, 1:], so the answer occupies 3 target positions.
+        length, offset, width, vocab = 5, 2, 9, 8
+        expected = length - offset
+
+        batch_np = np.ones((1, width), dtype=np.int32)
+        lengths_np = np.array([[offset, length]], dtype=np.int32)
+        if mx is not None:
+            batch = mx.array(batch_np)
+            lengths = mx.array(lengths_np)
+            stub_model = lambda inputs: mx.zeros((1, width - 1, vocab))
+        else:
+            # No mlx here, so only an injected loss function can be probed; it does
+            # not look at these, it just reports how many positions it would grade.
+            batch, lengths = batch_np, lengths_np
+            stub_model = lambda inputs: np.zeros((1, width - 1, vocab))
+
+        _, ntoks = loss_fn(stub_model, batch, lengths)
+        graded = int(ntoks.item() if hasattr(ntoks, "item") else ntoks)
+        extra = graded - expected
+        return extra if extra in (0, 1) else None
+    except Exception:
+        return None
+
+
+def warn_if_loss_mask_is_off_by_one() -> None:
+    """Tell the user once per run when this mlx-lm inflates validation loss."""
+    if probe_mlx_lm_loss_mask() == 1:
+        print(
+            "  [Loss] This mlx-lm grades one padding position per example, which\n"
+            "         inflates validation loss - badly for short answers, barely for\n"
+            "         long ones. Read the curve's shape, not its value, and do not\n"
+            "         compare loss between models. Scores from the test-set\n"
+            "         evaluation are unaffected."
+        )
+
+
 def notify_macos(title: str, message: str) -> None:
     """Fire a native macOS desktop notification via AppleScript."""
     try:
@@ -237,6 +303,9 @@ def execute_single_run(
             print(f"  [Layers]    -1 -> all {_depth} layers in {r.model}")
         else:
             print(f"  [Layers]    -1 -> all layers (depth of {r.model} not readable here)")
+
+    if engine != "mlx_vlm":
+        warn_if_loss_mask_is_off_by_one()
 
     # Initialize Weights & Biases tracking if enabled and authenticated
     tracker = WandbTracker(project=wandb_project or r.wandb_project, enabled=enable_wandb)
