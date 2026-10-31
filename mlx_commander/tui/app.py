@@ -351,9 +351,23 @@ def prompt_vlm_sweep_batch_tweak(stdscr: Optional[curses.window], multi_config: 
     return False
 
 
+def _heal_multi_lora_models(multi_config: Any) -> None:
+    """Normalize and resolve local paths for all models in a MultiLoraRunConfig."""
+    from mlx_commander.lora.model_info import normalize_model_path
+
+    healed_models = []
+    for _m in multi_config.get_field_values("model"):
+        _h = normalize_model_path(_m)
+        healed_models.append(_h if _h and Path(_h).exists() else _m)
+    if healed_models:
+        multi_config.model = (
+            healed_models[0] if len(healed_models) == 1 else healed_models
+        )
+
+
 def validate_lora_queue_preconditions(
     stdscr: curses.window,
-    model_path: str,
+    model_path: Any,
     data_path: str,
     config: Optional[Any] = None,
     multi_config: Optional[Any] = None,
@@ -364,8 +378,20 @@ def validate_lora_queue_preconditions(
     """
     from mlx_commander.lora.model_info import is_local_path, normalize_model_path, is_model_directory
 
-    # 1. Model validation
-    if not model_path or model_path.strip() in ("", "None", "(No Model Selected)"):
+    # 1. Model validation (supports both single model string and multi-model sweep lists)
+    if isinstance(model_path, list):
+        raw_models = [str(m) for m in model_path]
+    elif multi_config is not None and hasattr(multi_config, "get_field_values"):
+        raw_models = [str(m) for m in multi_config.get_field_values("model")]
+    else:
+        raw_models = [str(model_path)] if model_path is not None else []
+
+    valid_models = [
+        m.strip()
+        for m in raw_models
+        if m and m.strip() not in ("", "None", "(No Model Selected)")
+    ]
+    if not valid_models:
         show_error_dialog(
             stdscr,
             "Base Model Required",
@@ -373,28 +399,29 @@ def validate_lora_queue_preconditions(
         )
         return False
 
-    healed_model = normalize_model_path(model_path.strip())
-    if is_local_path(model_path) or is_local_path(healed_model):
-        model_p = Path(healed_model).expanduser().resolve()
-        if not model_p.exists():
-            show_error_dialog(
-                stdscr,
-                "Model Not Found",
-                f"The selected base model directory does not exist on disk:\n\n"
-                f"  {model_path.strip()}\n\n"
-                f"Please select a valid local model directory or Hugging Face model ID.",
-            )
-            return False
+    for m_str in valid_models:
+        healed_model = normalize_model_path(m_str)
+        if is_local_path(m_str) or is_local_path(healed_model):
+            model_p = Path(healed_model).expanduser().resolve()
+            if not model_p.exists():
+                show_error_dialog(
+                    stdscr,
+                    "Model Not Found",
+                    f"The selected base model directory does not exist on disk:\n\n"
+                    f"  {m_str}\n\n"
+                    f"Please select a valid local model directory or Hugging Face model ID.",
+                )
+                return False
 
-        if not is_model_directory(model_p):
-            show_error_dialog(
-                stdscr,
-                "Invalid Model Directory",
-                f"The directory does not appear to contain valid model files:\n\n"
-                f"  {model_path.strip()}\n\n"
-                f"Missing config.json or weights (.safetensors) files.",
-            )
-            return False
+            if not is_model_directory(model_p):
+                show_error_dialog(
+                    stdscr,
+                    "Invalid Model Directory",
+                    f"The directory does not appear to contain valid model files:\n\n"
+                    f"  {m_str}\n\n"
+                    f"Missing config.json or weights (.safetensors) files.",
+                )
+                return False
 
     # 2. Dataset validation
     if not data_path or data_path.strip() in ("", "None"):
@@ -434,31 +461,36 @@ def validate_lora_queue_preconditions(
         inspect_local_model,
         validate_dataset_for_engine,
     )
-    meta = inspect_local_model(model_path.strip())
-    engine = getattr(meta, "engine", None) or detect_model_engine(raw_config=meta.raw_config if meta else None, model_name_or_path=model_path.strip())
-    if engine == "mlx_vlm" and not is_engine_installed("mlx_vlm"):
-        show_error_dialog(
-            stdscr,
-            "Missing Dependency: mlx-vlm",
-            f"The selected model requires 'mlx-vlm' (Vision-Language / Multimodal model):\n\n"
-            f"  Model: {model_path.strip()}\n\n"
-            f"Please install it in your Python environment by running:\n\n"
-            f"  pip install \"mlx-vlm[train]\"\n\n"
-            f"Note: mlx-vlm requires Python 3.10+.",
+    engine = "mlx_lm"
+    for m_str in valid_models:
+        meta = inspect_local_model(m_str)
+        m_engine = getattr(meta, "engine", None) or detect_model_engine(
+            raw_config=meta.raw_config if meta else None,
+            model_name_or_path=m_str,
         )
-        return False
+        if m_engine == "mlx_vlm":
+            engine = "mlx_vlm"
+            if not is_engine_installed("mlx_vlm"):
+                show_error_dialog(
+                    stdscr,
+                    "Missing Dependency: mlx-vlm",
+                    f"The selected model requires 'mlx-vlm' (Vision-Language / Multimodal model):\n\n"
+                    f"  Model: {m_str}\n\n"
+                    f"Please install it in your Python environment by running:\n\n"
+                    f"  pip install \"mlx-vlm[train]\"\n\n"
+                    f"Note: mlx-vlm requires Python 3.10+.",
+                )
+                return False
 
     # 3b. Layer count must fit every model in the run or sweep. mlx-lm raises
     # "Requested to train N layers but the model only has M layers", so a run queued
     # with too many layers fails once training starts rather than at setup.
     layer_specs: List[Any] = []
-    models_to_check: List[str] = []
+    models_to_check: List[str] = list(valid_models)
     if multi_config is not None:
         layer_specs = list(multi_config.get_field_values("num_layers"))
-        models_to_check = [str(m) for m in multi_config.get_field_values("model")]
     elif config is not None:
         layer_specs = [getattr(config, "num_layers", 16)]
-        models_to_check = [model_path.strip()]
 
     for m_name in models_to_check:
         m_meta = inspect_local_model(m_name)
@@ -2192,14 +2224,7 @@ def _handle_mode3_input(
                         state.status_is_error = False
             elif idx == len(SWEEP_FIELD_DEFS):  # Add sweep to queue
                 if validate_lora_queue_preconditions(stdscr, state.multi_lora_config.primary_model, state.multi_lora_config.data, multi_config=state.multi_lora_config):
-                    from mlx_commander.lora.model_info import normalize_model_path
-                    healed_models = []
-                    for _m in state.multi_lora_config.get_field_values("model"):
-                        _h = normalize_model_path(_m)
-                        healed_models.append(_h if _h and Path(_h).exists() else _m)
-                    state.multi_lora_config.model = (
-                        healed_models[0] if len(healed_models) == 1 else healed_models
-                    )
+                    _heal_multi_lora_models(state.multi_lora_config)
                     added = state.add_multi_lora_runs_to_queue()
                     state.status_message = f"Added {len(added)} sweep run(s) to queue ({len(state.queue_manager.runs)} total queued)."
                     state.status_is_error = False
@@ -2213,11 +2238,8 @@ def _handle_mode3_input(
             state.multi_active_panel = "left"
             state.multi_left_focus_idx = 0
         elif key in (10, 13, curses.KEY_ENTER, 32):  # Add sweep to queue
-            if validate_lora_queue_preconditions(stdscr, state.multi_lora_config.model, state.multi_lora_config.data, multi_config=state.multi_lora_config):
-                from mlx_commander.lora.model_info import normalize_model_path
-                healed = normalize_model_path(state.multi_lora_config.model)
-                if healed and Path(healed).exists():
-                    state.multi_lora_config.model = healed
+            if validate_lora_queue_preconditions(stdscr, state.multi_lora_config.primary_model, state.multi_lora_config.data, multi_config=state.multi_lora_config):
+                _heal_multi_lora_models(state.multi_lora_config)
                 added = state.add_multi_lora_runs_to_queue()
                 state.status_message = f"Added {len(added)} sweep run(s) to queue ({len(state.queue_manager.runs)} total queued)."
                 state.status_is_error = False
@@ -2648,11 +2670,8 @@ def run_commander_tui(
 
             elif key == curses.KEY_F6:
                 if state.active_tab == 2:
-                    if validate_lora_queue_preconditions(stdscr, state.multi_lora_config.model, state.multi_lora_config.data, multi_config=state.multi_lora_config):
-                        from mlx_commander.lora.model_info import normalize_model_path
-                        healed = normalize_model_path(state.multi_lora_config.model)
-                        if healed and Path(healed).exists():
-                            state.multi_lora_config.model = healed
+                    if validate_lora_queue_preconditions(stdscr, state.multi_lora_config.primary_model, state.multi_lora_config.data, multi_config=state.multi_lora_config):
+                        _heal_multi_lora_models(state.multi_lora_config)
                         added = state.add_multi_lora_runs_to_queue()
                         state.status_message = f"Added {len(added)} sweep run(s) to queue ({len(state.queue_manager.runs)} total queued)."
                         state.status_is_error = False
@@ -2687,12 +2706,9 @@ def run_commander_tui(
                     execute_lora_queue_action(stdscr, state)
                 else:
                     if not state.queue_manager or not state.queue_manager.get_pending_runs():
-                        if not validate_lora_queue_preconditions(stdscr, state.multi_lora_config.model, state.multi_lora_config.data, multi_config=state.multi_lora_config):
+                        if not validate_lora_queue_preconditions(stdscr, state.multi_lora_config.primary_model, state.multi_lora_config.data, multi_config=state.multi_lora_config):
                             continue
-                        from mlx_commander.lora.model_info import normalize_model_path
-                        healed = normalize_model_path(state.multi_lora_config.model)
-                        if healed and Path(healed).exists():
-                            state.multi_lora_config.model = healed
+                        _heal_multi_lora_models(state.multi_lora_config)
                         state.add_multi_lora_runs_to_queue()
                     execute_lora_queue_action(stdscr, state)
 

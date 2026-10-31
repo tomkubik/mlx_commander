@@ -1001,7 +1001,7 @@ def show_text_edit_dialog(
             text_chars = text_chars[:cursor_pos]
         elif 32 <= k <= 126:
             char = chr(k)
-            if is_number and char not in "0123456789.":
+            if is_number and char not in "0123456789.-":
                 continue
             text_chars.insert(cursor_pos, char)
             cursor_pos += 1

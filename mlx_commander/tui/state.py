@@ -309,7 +309,8 @@ class CommanderState:
                 self.status_message = "Switched to Single Run Mode."
             elif self.active_tab == 2:
                 self.sync_dataset_to_lora()
-                self.multi_lora_config.model = self.lora_config.model
+                if len(self.multi_lora_config.get_field_values("model")) <= 1:
+                    self.multi_lora_config.model = self.lora_config.model
                 self.multi_lora_config.fine_tune_type = self.lora_config.fine_tune_type
                 self.multi_lora_config.optimizer = self.lora_config.optimizer
                 self.status_message = "Switched to Multi-Run Matrix Mode."

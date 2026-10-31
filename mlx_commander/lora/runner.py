@@ -150,7 +150,6 @@ def probe_mlx_lm_loss_mask(loss_fn: Optional[Any] = None) -> Optional[int]:
             import mlx.core as mx
         except Exception:
             mx = None
-        import numpy as np
 
         if loss_fn is None:
             from mlx_lm.tuner.trainer import default_loss as loss_fn
@@ -162,17 +161,16 @@ def probe_mlx_lm_loss_mask(loss_fn: Optional[Any] = None) -> Optional[int]:
         length, offset, width, vocab = 5, 2, 9, 8
         expected = length - offset
 
-        batch_np = np.ones((1, width), dtype=np.int32)
-        lengths_np = np.array([[offset, length]], dtype=np.int32)
         if mx is not None:
-            batch = mx.array(batch_np)
-            lengths = mx.array(lengths_np)
+            batch = mx.ones((1, width), dtype=mx.int32)
+            lengths = mx.array([[offset, length]], dtype=mx.int32)
             stub_model = lambda inputs: mx.zeros((1, width - 1, vocab))
         else:
             # No mlx here, so only an injected loss function can be probed; it does
             # not look at these, it just reports how many positions it would grade.
-            batch, lengths = batch_np, lengths_np
-            stub_model = lambda inputs: np.zeros((1, width - 1, vocab))
+            batch = [[1] * width]
+            lengths = [[offset, length]]
+            stub_model = lambda inputs: [[[0.0] * vocab for _ in range(width - 1)]]
 
         _, ntoks = loss_fn(stub_model, batch, lengths)
         graded = int(ntoks.item() if hasattr(ntoks, "item") else ntoks)

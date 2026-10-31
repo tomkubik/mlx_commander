@@ -80,11 +80,29 @@ def append_to_leaderboard_csv(
         "adapter_path": run_dict.get("adapter_path", ""),
     }
 
-    with open(csv_path, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        if not file_exists:
+    existing_rows: Optional[List[Dict[str, Any]]] = None
+    if file_exists:
+        try:
+            with open(csv_path, "r", newline="", encoding="utf-8") as rf:
+                reader = csv.DictReader(rf)
+                if reader.fieldnames and list(reader.fieldnames) != fieldnames:
+                    existing_rows = list(reader)
+        except Exception:
+            existing_rows = None
+
+    if existing_rows is not None:
+        with open(csv_path, "w", newline="", encoding="utf-8") as wf:
+            writer = csv.DictWriter(wf, fieldnames=fieldnames)
             writer.writeheader()
-        writer.writerow(row)
+            for old_row in existing_rows:
+                writer.writerow({k: old_row.get(k, "") for k in fieldnames})
+            writer.writerow(row)
+    else:
+        with open(csv_path, "a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(row)
 
 
 def save_run_predictions(
