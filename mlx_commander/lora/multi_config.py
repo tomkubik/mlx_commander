@@ -35,6 +35,7 @@ SWEEP_FIELD_DEFS = [
     ("mask_prompt", "Mask prompt", bool),
     ("save_every", "Save Every", int),
     ("steps_per_eval", 'Steps per "Eval" (validation loss)', int),
+    ("val_batches", "Validation Batches (-1 = all)", int),
     ("run_eval", "Run evals on test set (experimental)", bool),
     ("seed", "Seed", int),
 ]
@@ -55,7 +56,7 @@ class MultiLoraRunConfig:
     optimizer: str = "adamw"
     adapter_path: str = "adapters"
     seed: Union[int, List[int]] = 0
-    val_batches: int = 25
+    val_batches: Union[int, List[int]] = field(default_factory=lambda: [-1])
     engine: str = "mlx_lm"
     train_vision: bool = False
     train_on_completions: bool = True
@@ -146,7 +147,7 @@ class MultiLoraRunConfig:
                 optimizer=self.optimizer,
                 adapter_path=self.adapter_path,
                 seed=comb_dict["seed"],
-                val_batches=self.val_batches,
+                val_batches=comb_dict["val_batches"],
                 grad_accumulation_steps=comb_dict["grad_accumulation_steps"],
                 iters=comb_dict["iters"],
                 batch_size=comb_dict["batch_size"],
@@ -175,6 +176,7 @@ class MultiLoraRunConfig:
         dataset_records: int,
         chip_name: Optional[str] = None,
         model_size_gb: Optional[float] = None,
+        val_records: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Calculate aggregated runtime estimates for the multi-run sweep:
@@ -208,15 +210,15 @@ class MultiLoraRunConfig:
                 if ep is not None and ep < min_epochs:
                     min_epochs = ep
 
-            # 2. Peak RAM: passes LoraRunConfig
-            mem_est = estimate_peak_memory(r)
+            # 2. Peak RAM: passes LoraRunConfig and validation split size
+            mem_est = estimate_peak_memory(r, val_records=val_records)
             peak_gb = mem_est.get("peak_gb", 0)
             if peak_gb >= max_ram:
                 max_ram = peak_gb
                 max_ram_dict = mem_est
 
-            # 3. Duration: passes LoraRunConfig, chip_name
-            dur_est = estimate_duration(r, chip_name=chip_name)
+            # 3. Duration: passes LoraRunConfig, chip_name, and validation split size
+            dur_est = estimate_duration(r, chip_name=chip_name, val_records=val_records)
             total_duration += dur_est.get("seconds", 0.0)
 
         if min_epochs == float("inf"):

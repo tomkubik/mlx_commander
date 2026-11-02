@@ -27,6 +27,7 @@ class TestLoraConfig(unittest.TestCase):
         self.assertFalse(cfg.test)
         self.assertEqual(cfg.status, "queued")
         self.assertEqual(cfg.steps_per_eval, 100)
+        self.assertEqual(cfg.val_batches, -1)
 
     def test_popular_models_and_constants(self):
         self.assertGreater(len(POPULAR_MLX_MODELS), 5)
@@ -83,6 +84,7 @@ class TestLoraConfig(unittest.TestCase):
         self.assertIn("--grad-checkpoint", cmd)
         self.assertIn("--mask-prompt", cmd)
         self.assertIn("--steps-per-eval 100", cmd)
+        self.assertIn("--val-batches -1", cmd)
 
     def test_dict_serialization_round_trip(self):
         cfg1 = LoraRunConfig(
@@ -134,3 +136,7 @@ class TestLoraConfig(unittest.TestCase):
         cfg_rank = LoraRunConfig(lora_rank=0)
         errors = cfg_rank.validate()
         self.assertTrue(any("LoRA rank must be > 0" in e for e in errors))
+
+        cfg_vb = LoraRunConfig(val_batches=0)
+        errors = cfg_vb.validate()
+        self.assertTrue(any("Validation batches must be > 0, or -1" in e for e in errors))

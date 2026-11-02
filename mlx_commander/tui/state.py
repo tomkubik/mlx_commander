@@ -239,6 +239,31 @@ class CommanderState:
                     pass
         return 0
 
+    def get_valid_record_count(self) -> int:
+        """Return the number of validation records, cached by file mtime to eliminate disk I/O during render."""
+        if self.loaded_dataset:
+            split_counts = self.get_split_counts()
+            if "valid" in split_counts:
+                return split_counts.get("valid", 0)
+        if self.lora_config.data:
+            for fname in ("valid.jsonl", "validation.jsonl"):
+                val_f = Path(self.lora_config.data) / fname
+                if val_f.exists():
+                    try:
+                        mtime = val_f.stat().st_mtime
+                        cache_key = str(val_f.resolve())
+                        if cache_key in self._cached_train_counts:
+                            cached_mtime, cached_cnt = self._cached_train_counts[cache_key]
+                            if cached_mtime == mtime:
+                                return cached_cnt
+                        with open(val_f, "rb") as f:
+                            cnt = sum(1 for line in f if line.strip())
+                        self._cached_train_counts[cache_key] = (mtime, cnt)
+                        return cnt
+                    except Exception:
+                        pass
+        return 0
+
     def get_implied_epochs(self) -> Optional[float]:
         """Calculate implied epochs: (iters * batch_size * grad_accumulation_steps) / train_records."""
         train_count = self.get_train_record_count()
@@ -250,23 +275,42 @@ class CommanderState:
         )
 
     def get_memory_estimate(self) -> Dict[str, Any]:
-        """Return peak memory estimate (cached by configuration parameters)."""
+        """Return peak memory estimate (cached by configuration parameters and validation split size)."""
         cfg = self.lora_config
-        key = (cfg.model, cfg.batch_size, cfg.max_seq_length, cfg.lora_rank, cfg.num_layers, cfg.grad_checkpoint)
+        val_count = self.get_valid_record_count()
+        key = (
+            cfg.model,
+            cfg.batch_size,
+            cfg.max_seq_length,
+            cfg.lora_rank,
+            cfg.num_layers,
+            cfg.grad_checkpoint,
+            cfg.val_batches,
+            val_count,
+        )
         if self._cached_mem_key == key and self._cached_mem_estimate is not None:
             return self._cached_mem_estimate
-        est = estimate_peak_memory(cfg)
+        est = estimate_peak_memory(cfg, val_records=val_count)
         self._cached_mem_key = key
         self._cached_mem_estimate = est
         return est
 
     def get_duration_estimate(self) -> Dict[str, Any]:
-        """Return training duration estimate (cached by configuration parameters)."""
+        """Return training duration estimate (cached by configuration parameters and validation split size)."""
         cfg = self.lora_config
-        key = (cfg.model, cfg.iters, cfg.batch_size, cfg.max_seq_length)
+        val_count = self.get_valid_record_count()
+        key = (
+            cfg.model,
+            cfg.iters,
+            cfg.batch_size,
+            cfg.max_seq_length,
+            cfg.steps_per_eval,
+            cfg.val_batches,
+            val_count,
+        )
         if self._cached_dur_key == key and self._cached_dur_estimate is not None:
             return self._cached_dur_estimate
-        est = estimate_duration(cfg)
+        est = estimate_duration(cfg, val_records=val_count)
         self._cached_dur_key = key
         self._cached_dur_estimate = est
         return est
@@ -282,8 +326,10 @@ class CommanderState:
     def get_multi_sweep_estimates(self) -> Dict[str, Any]:
         """Calculate aggregated runtime estimates for the multi-run sweep."""
         train_count = self.get_train_record_count()
+        val_count = self.get_valid_record_count()
         return self.multi_lora_config.calculate_sweep_estimates(
             dataset_records=train_count,
+            val_records=val_count,
         )
 
     def sync_dataset_to_lora(self) -> None:

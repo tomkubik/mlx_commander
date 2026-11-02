@@ -192,3 +192,53 @@ class TestLoraEstimator(unittest.TestCase):
         self.assertGreater(tps_max, tps_pro)
         self.assertGreater(tps_pro, tps_base)
 
+    def test_estimate_duration_and_memory_scale_with_validation_set_size(self):
+        import tempfile
+        from pathlib import Path
+        from mlx_commander.lora.estimator import clear_estimator_cache, get_validation_record_count
+
+        clear_estimator_cache()
+        with tempfile.TemporaryDirectory() as td:
+            ds_dir = Path(td)
+            valid_f = ds_dir / "valid.jsonl"
+            with open(valid_f, "w", encoding="utf-8") as f:
+                for i in range(400):
+                    f.write(f'{{"prompt": "Q{i}", "completion": "A{i}"}}\n')
+
+            self.assertEqual(get_validation_record_count(str(ds_dir)), 400)
+
+            cfg_all = LoraRunConfig(
+                model="mlx-community/Llama-3.2-3B-Instruct-4bit",
+                data=str(ds_dir),
+                iters=500,
+                batch_size=4,
+                steps_per_eval=100,
+                val_batches=-1,  # All 100 batches (400 / 4)
+            )
+            cfg_capped = LoraRunConfig(
+                model="mlx-community/Llama-3.2-3B-Instruct-4bit",
+                data=str(ds_dir),
+                iters=500,
+                batch_size=4,
+                steps_per_eval=100,
+                val_batches=10,  # Only 10 batches
+            )
+
+            dur_no_val = estimate_duration(cfg_all, val_records=0)
+            dur_capped = estimate_duration(cfg_capped)
+            dur_all = estimate_duration(cfg_all)
+
+            self.assertEqual(dur_all["val_records"], 400)
+            self.assertEqual(dur_all["effective_val_batches"], 100)
+            self.assertEqual(dur_capped["effective_val_batches"], 10)
+            self.assertGreater(dur_capped["seconds"], dur_no_val["seconds"])
+            self.assertGreater(dur_all["seconds"], dur_capped["seconds"])
+            self.assertGreater(dur_all["val_seconds"], dur_capped["val_seconds"])
+
+            mem_no_val = estimate_peak_memory(cfg_all, val_records=0)
+            mem_capped = estimate_peak_memory(cfg_capped)
+            mem_all = estimate_peak_memory(cfg_all)
+            self.assertEqual(mem_no_val["val_mem_gb"], 0.0)
+            self.assertGreater(mem_capped["val_mem_gb"], 0.0)
+            self.assertGreater(mem_all["val_mem_gb"], mem_capped["val_mem_gb"])
+

@@ -28,6 +28,7 @@ from .estimator import (
     estimate_peak_memory,
     get_apple_silicon_chip,
     get_hardware_memory_bytes,
+    get_validation_record_count,
 )
 from .model_info import (
     ModelMetadata,
@@ -81,6 +82,7 @@ __all__ = [
     "estimate_duration",
     "get_hardware_memory_bytes",
     "get_apple_silicon_chip",
+    "get_validation_record_count",
     "POPULAR_MLX_MODELS",
     "FINE_TUNE_TYPES",
     "OPTIMIZERS",

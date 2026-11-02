@@ -246,7 +246,9 @@ class LoraRunConfig:
     mask_prompt: bool = True
     steps_per_report: int = 10
     steps_per_eval: int = 100
-    val_batches: int = 25
+    # -1 evaluates the entire validation split on every eval check, eliminating
+    # the subsampling jitter caused by mlx-lm's unseeded 25-batch random draw.
+    val_batches: int = -1
     save_every: int = 100
     adapter_path: str = "adapters"
     seed: int = 0
@@ -495,6 +497,7 @@ class LoraRunConfig:
             f"--adapter-path {self.adapter_path}",
             f"--save-every {self.save_every}",
             f"--steps-per-eval {self.steps_per_eval}",
+            f"--val-batches {self.val_batches}",
             f"--steps-per-report {self.steps_per_report}",
         ])
         if self.grad_checkpoint:
@@ -520,6 +523,8 @@ class LoraRunConfig:
             errors.append("LoRA alpha must be > 0.")
         if self.num_layers == 0 or self.num_layers < -1:
             errors.append("Number of layers must be > 0, or -1 for every layer.")
+        if self.val_batches == 0 or self.val_batches < -1:
+            errors.append("Validation batches must be > 0, or -1 for the entire validation set.")
         if not (0.0 <= self.lora_dropout <= 0.5):
             errors.append("Dropout must be between 0.0 and 0.5.")
         if self.max_seq_length < 64:

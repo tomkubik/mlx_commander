@@ -49,7 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--steps-per-report", type=int, default=10)
     parser.add_argument("--steps-per-eval", type=int, default=200)
     parser.add_argument("--steps-per-save", type=int, default=100)
-    parser.add_argument("--val-batches", type=int, default=4)
+    parser.add_argument("--val-batches", type=int, default=-1)
     parser.add_argument("--max-seq-length", type=int, default=2048)
     parser.add_argument("--grad-checkpoint", action="store_true")
     parser.add_argument("--grad-clip", type=float, default=None)

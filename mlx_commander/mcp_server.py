@@ -233,6 +233,9 @@ def estimate_fine_tuning_resources_tool(
     lora_rank: int = 8,
     grad_checkpoint: bool = False,
     total_train_records: int = 0,
+    total_valid_records: int = 0,
+    val_batches: int = -1,
+    steps_per_eval: int = 100,
 ) -> Dict[str, Any]:
     """
     Estimate Unified Memory (RAM/VRAM) footprint, implied training epochs,
@@ -247,9 +250,12 @@ def estimate_fine_tuning_resources_tool(
             max_seq_length=max_seq_length,
             lora_rank=lora_rank,
             grad_checkpoint=grad_checkpoint,
+            val_batches=val_batches,
+            steps_per_eval=steps_per_eval,
         )
-        mem_info = estimate_peak_memory(cfg)
-        dur_info = estimate_duration(cfg)
+        val_cnt = total_valid_records if total_valid_records > 0 else None
+        mem_info = estimate_peak_memory(cfg, val_records=val_cnt)
+        dur_info = estimate_duration(cfg, val_records=val_cnt)
         epochs = (
             calculate_implied_epochs(
                 iters=iters,
@@ -273,6 +279,9 @@ def estimate_fine_tuning_resources_tool(
             "estimated_duration_sec": dur_info.get("total_seconds"),
             "estimated_duration_str": dur_info.get("formatted_duration"),
             "estimated_clock_eta": dur_info.get("eta_str"),
+            "val_records": dur_info.get("val_records", 0),
+            "effective_val_batches": dur_info.get("effective_val_batches", 0),
+            "val_seconds": dur_info.get("val_seconds", 0.0),
             "chip": dur_info.get("chip"),
         }
     except Exception as e:
@@ -697,6 +706,9 @@ def create_mcp_server():
         lora_rank: int = 8,
         grad_checkpoint: bool = False,
         total_train_records: int = 0,
+        total_valid_records: int = 0,
+        val_batches: int = -1,
+        steps_per_eval: int = 100,
     ) -> dict:
         """Estimate peak Unified Memory (RAM/VRAM) in GB, safety rating ([SAFE], [TIGHT], [OOM RISK]),
         implied training epochs, and wall-clock duration for an Apple Silicon fine-tuning configuration."""
@@ -709,6 +721,9 @@ def create_mcp_server():
             lora_rank=lora_rank,
             grad_checkpoint=grad_checkpoint,
             total_train_records=total_train_records,
+            total_valid_records=total_valid_records,
+            val_batches=val_batches,
+            steps_per_eval=steps_per_eval,
         )
 
     @server.tool()

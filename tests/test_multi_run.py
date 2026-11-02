@@ -53,6 +53,16 @@ class TestMultiLoraRunConfig(unittest.TestCase):
         self.assertEqual(runs[0].grad_accumulation_steps, 1)
         self.assertEqual(runs[1].grad_accumulation_steps, 4)
 
+    def test_cartesian_product_with_val_batches(self):
+        cfg = MultiLoraRunConfig(
+            val_batches=[-1, 25],
+            iters=[300],
+        )
+        runs = cfg.generate_runs()
+        self.assertEqual(len(runs), 2)
+        self.assertEqual(runs[0].val_batches, -1)
+        self.assertEqual(runs[1].val_batches, 25)
+
     def test_varying_hyperparameters(self):
         cfg = MultiLoraRunConfig(
             learning_rate=[1e-4, 2e-4, 5e-4],

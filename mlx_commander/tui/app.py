@@ -313,6 +313,37 @@ def format_layers_display(num_layers: Any, model_depth: Optional[int]) -> str:
     return f"{n}  ({round(n / model_depth * 100)}% of {model_depth})"
 
 
+def _val_batches_prompt(state: Any) -> str:
+    """Edit-dialog prompt for Validation Batches, showing total validation batches when known."""
+    val_cnt = state.get_valid_record_count() if hasattr(state, "get_valid_record_count") else 0
+    b_size = max(1, int(getattr(getattr(state, "lora_config", None), "batch_size", 4)))
+    if val_cnt and val_cnt > 0:
+        total_b = max(1, val_cnt // b_size)
+        return f"Validation batches per eval: 1 to {total_b} ({val_cnt} rows), or -1 for all."
+    return "Validation batches per eval (e.g. 25), or -1 for all batches."
+
+
+def format_val_batches_display(val_batches: Any, val_records: Optional[int], batch_size: int) -> str:
+    """Render the Validation Batches value with what it covers in valid.jsonl."""
+    try:
+        n = int(val_batches)
+    except (TypeError, ValueError):
+        return str(val_batches)
+
+    b_size = max(1, int(batch_size or 4))
+    if not val_records or val_records <= 0:
+        if n == -1:
+            return "-1  (all batches)"
+        return str(n)
+
+    total_b = max(1, val_records // b_size)
+    if n == -1:
+        return f"-1  (all {total_b} batches / {val_records} rows)"
+    eff_b = min(n, total_b)
+    pct = min(100, round(100 * eff_b / total_b))
+    return f"{n}  ({eff_b}/{total_b} batches, {pct}%)"
+
+
 def prompt_vlm_sweep_batch_tweak(stdscr: Optional[curses.window], multi_config: Any) -> bool:
     """
     Prompt user with an interactive suggestion dialog to tweak multi-run batch_size
@@ -1056,6 +1087,7 @@ def _draw_mode2_dashboard(
     inner_h = max(1, panel_h - 2)
 
     _model_depth = getattr(getattr(state, "current_model_metadata", None), "num_layers", None)
+    _val_count = state.get_valid_record_count()
     fields_def = [
         (0, "Training Iterations", str(cfg.iters), 10, False),
         (1, "Batch Size", str(cfg.batch_size), 8, False),
@@ -1070,8 +1102,9 @@ def _draw_mode2_dashboard(
         (10, "Mask Prompt", "True" if cfg.mask_prompt else "False", 10, False),
         (11, "Save Every", str(cfg.save_every), 8, False),
         (12, 'Steps per "Eval" (validation loss)', str(cfg.steps_per_eval), 8, False),
+        (13, "Validation Batches (-1 = all)", format_val_batches_display(cfg.val_batches, _val_count, cfg.batch_size), 34, False),
         (
-            13,
+            14,
             "Run evals on test set (experimental)",
             EVAL_STRATEGY_DISPLAY_MAP.get(getattr(cfg, "eval_adapter_strategy", EVAL_STRATEGY_FINAL), "Yes")
             if getattr(cfg, "run_eval", False)
@@ -1081,8 +1114,8 @@ def _draw_mode2_dashboard(
             else 8,
             False,
         ),
-        (14, "Adapter Path", cfg.adapter_path, max(14, right_w - 20), False),
-        (15, "+ Add to Queue (F6)", "", 0, True),
+        (15, "Adapter Path", cfg.adapter_path, max(14, right_w - 20), False),
+        (16, "+ Add to Queue (F6)", "", 0, True),
     ]
 
     # Handle smooth scrolling in single-column hyperparameter list
@@ -1179,10 +1212,15 @@ def _draw_mode2_dashboard(
     breakdown_line = f"  RAM Breakdown:    Base Model: {m_base} GB │ Activations: {m_act} GB │ LoRA Optimizer (fp32): {m_opt} GB"
     dur_est = state.get_duration_estimate()
     dur_line = f"• Est. Duration:     {dur_est.get('duration_str', '1m')} (ETA: {dur_est.get('eta_clock', 'N/A')})"
+    eff_vb = dur_est.get("effective_val_batches", 0)
+    num_ve = dur_est.get("num_val_evals", 0)
+    val_note = f"  [incl. {num_ve} val evals × {eff_vb} batches]" if (eff_vb > 0 and num_ve > 0) else ""
 
     if vis_h >= 6:
         safe_addstr(stdscr, vis_y + 3, 2, breakdown_line[:max_x - 4], gray_unbold)
         safe_addstr(stdscr, vis_y + 4, 2, dur_line[:max_x - 4], white_unbold)
+        if val_note and len(dur_line) + 2 < max_x - 4:
+            safe_addstr(stdscr, vis_y + 4, 2 + len(dur_line), val_note[:max_x - 4 - len(dur_line)], gray_unbold)
     else:
         safe_addstr(stdscr, vis_y + 3, 2, dur_line[:max_x - 4], white_unbold)
         bd_compact = f" │ Base: {m_base} GB │ Act: {m_act} GB │ Opt: {m_opt} GB"
@@ -1350,8 +1388,9 @@ def _draw_mode3_dashboard(
         (11, "Mask Prompt", cfg.mask_prompt, bool, False),
         (12, "Save Every", cfg.save_every, int, False),
         (13, 'Steps per "Eval" (validation loss)', cfg.steps_per_eval, int, False),
+        (14, "Validation Batches (-1 = all)", cfg.get_field_values("val_batches"), int, False),
         (
-            14,
+            15,
             "Run evals on test set (experimental)",
             [EVAL_STRATEGY_DISPLAY_MAP.get(getattr(cfg, "eval_adapter_strategy", EVAL_STRATEGY_FINAL), "Yes")]
             if any(getattr(cfg, "run_eval", [False]))
@@ -1359,8 +1398,8 @@ def _draw_mode3_dashboard(
             bool,
             False,
         ),
-        (15, "Seed", cfg.get_field_values("seed"), int, False),
-        (16, "+ Add Sweep to Queue (F6)", [], None, True),
+        (16, "Seed", cfg.get_field_values("seed"), int, False),
+        (17, "+ Add Sweep to Queue (F6)", [], None, True),
     ]
 
     # Handle smooth scrolling in right panel (conditions always visible when space permits)
@@ -1845,7 +1884,7 @@ def _handle_mode2_input(
                 state.lora_active_panel = "left"
                 state.lora_left_focus_idx = 5
         elif key in (curses.KEY_DOWN, ord("j")):
-            if state.lora_right_focus_idx < 15:
+            if state.lora_right_focus_idx < 16:
                 state.lora_right_focus_idx += 1
             else:
                 state.lora_active_panel = "queue"
@@ -1927,9 +1966,19 @@ def _handle_mode2_input(
             elif idx == 12:  # Steps per eval
                 val = show_text_edit_dialog(stdscr, 'Steps per "Eval" (validation loss)', "Evaluate on validation split every N steps:", str(state.lora_config.steps_per_eval), is_number=True)
                 if val:
-                    try: state.lora_config.steps_per_eval = max(1, int(val))
+                    try:
+                        state.lora_config.steps_per_eval = max(1, int(val))
+                        state.clear_estimates_cache()
                     except ValueError: pass
-            elif idx == 13:  # Run evals on test set (experimental)
+            elif idx == 13:  # Validation Batches
+                val = show_text_edit_dialog(stdscr, "Validation Batches (-1 = all)", _val_batches_prompt(state), str(state.lora_config.val_batches), is_number=True)
+                if val:
+                    try:
+                        parsed_vb = int(val)
+                        state.lora_config.val_batches = -1 if parsed_vb <= -1 else max(1, parsed_vb)
+                        state.clear_estimates_cache()
+                    except ValueError: pass
+            elif idx == 14:  # Run evals on test set (experimental)
                 choice_labels = [label for _, label in EVAL_STRATEGY_CHOICES]
                 curr_strat = getattr(state.lora_config, "eval_adapter_strategy", EVAL_STRATEGY_FINAL)
                 curr_enabled = getattr(state.lora_config, "run_eval", False)
@@ -1956,7 +2005,7 @@ def _handle_mode2_input(
                         state.lora_config.eval_adapter_strategy = selected_strat
                         state.status_message = f"Test set evaluation set to: {chosen}"
                     state.status_is_error = False
-            elif idx == 14:  # Adapter Out
+            elif idx == 15:  # Adapter Out
                 val = show_text_edit_dialog(stdscr, "Adapter Path", "Directory to store fine-tuned LoRA weights:", state.lora_config.adapter_path)
                 if val is not None:
                     cleaned = val.strip()
@@ -1969,7 +2018,7 @@ def _handle_mode2_input(
                         state.update_deterministic_lora_name()
                         state.status_message = f"Adapter path reset to default: {state.lora_config.adapter_path}"
                     state.status_is_error = False
-            elif idx == 15:  # Add to Queue
+            elif idx == 16:  # Add to Queue
                 if validate_lora_queue_preconditions(stdscr, state.lora_config.model, state.lora_config.data, config=state.lora_config):
                     state.update_deterministic_lora_name()
                     state.clear_estimates_cache()
@@ -1989,7 +2038,7 @@ def _handle_mode2_input(
                 state.selected_queue_idx -= 1
             else:
                 state.lora_active_panel = "right"
-                state.lora_right_focus_idx = 15
+                state.lora_right_focus_idx = 16
         elif key in (curses.KEY_DOWN, ord("j")):
             if num_runs > 0 and state.selected_queue_idx < num_runs - 1:
                 state.selected_queue_idx += 1

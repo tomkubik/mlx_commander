@@ -233,6 +233,7 @@ class TestLoraUI(unittest.TestCase):
             "Mask Prompt",
             "Save Every",
             'Steps per "Eval" (validation loss)',
+            "Validation Batches (-1 = all)",
             "Adapter Path",
             "+ Add to Queue (F6)",
         ]
@@ -453,7 +454,7 @@ class TestLoraUI(unittest.TestCase):
         state = CommanderState()
         state.active_tab = 1
         state.lora_active_panel = "right"
-        state.lora_right_focus_idx = 13  # Run evals on test set (experimental)
+        state.lora_right_focus_idx = 14  # Run evals on test set (experimental)
         self.assertFalse(state.lora_config.run_eval)
 
         # Press Enter (10) to open dialog, Enter (10) to select choice 0 ('final'), then 'q' to exit
@@ -473,7 +474,7 @@ class TestLoraUI(unittest.TestCase):
         state = CommanderState()
         state.active_tab = 1
         state.lora_active_panel = "right"
-        state.lora_right_focus_idx = 13
+        state.lora_right_focus_idx = 14
         self.assertFalse(state.lora_config.run_eval)
 
         # Press Enter (10) -> choice dialog, KEY_DOWN (1) -> min val loss, Enter (10) -> confirm, 'q' -> exit
@@ -493,7 +494,7 @@ class TestLoraUI(unittest.TestCase):
         state = CommanderState()
         state.active_tab = 1
         state.lora_active_panel = "right"
-        state.lora_right_focus_idx = 13
+        state.lora_right_focus_idx = 14
 
         # Press Enter (10) -> choice dialog, KEY_DOWN x2 -> min train loss, Enter (10) -> confirm, 'q' -> exit
         self.mock_win.reset_mock()
@@ -512,7 +513,7 @@ class TestLoraUI(unittest.TestCase):
         state = CommanderState()
         state.active_tab = 1
         state.lora_active_panel = "right"
-        state.lora_right_focus_idx = 13
+        state.lora_right_focus_idx = 14
 
         # Press Enter (10) -> choice dialog, KEY_DOWN x3 -> all adapters, Enter (10) -> confirm, 'q' -> exit
         self.mock_win.reset_mock()
@@ -531,7 +532,7 @@ class TestLoraUI(unittest.TestCase):
         state = CommanderState()
         state.active_tab = 1
         state.lora_active_panel = "right"
-        state.lora_right_focus_idx = 13
+        state.lora_right_focus_idx = 14
         state.lora_config.run_eval = False
 
         # Press Enter (10) -> choice dialog, Esc (27) -> cancel, 'q' -> exit
@@ -592,20 +593,20 @@ class TestLoraUI(unittest.TestCase):
         self.assertEqual(state.lora_active_panel, "right")
         self.assertEqual(state.lora_right_focus_idx, 0, "DOWN from bottom of selector pane must focus top row (0) of hyperparameter pane")
 
-        # 3. At bottom of right pane (15), press DOWN -> should go to queue pane (0)
-        state.lora_right_focus_idx = 15
+        # 3. At bottom of right pane (16), press DOWN -> should go to queue pane (0)
+        state.lora_right_focus_idx = 16
         self.mock_win.reset_mock()
         self.mock_win.getch.side_effect = [curses.KEY_DOWN, ord("q")]
         run_commander_tui(self.mock_win, initial_state=state)
         self.assertEqual(state.lora_active_panel, "queue")
         self.assertEqual(state.selected_queue_idx, 0, "DOWN from bottom of hyperparameter pane must focus queue pane")
 
-        # 4. At top of queue pane (0), press UP -> should go to right pane, bottom row (15)
+        # 4. At top of queue pane (0), press UP -> should go to right pane, bottom row (16)
         self.mock_win.reset_mock()
         self.mock_win.getch.side_effect = [curses.KEY_UP, ord("q")]
         run_commander_tui(self.mock_win, initial_state=state)
         self.assertEqual(state.lora_active_panel, "right")
-        self.assertEqual(state.lora_right_focus_idx, 15, "UP from top of queue pane must focus bottom row (15) of hyperparameter pane")
+        self.assertEqual(state.lora_right_focus_idx, 16, "UP from top of queue pane must focus bottom row (16) of hyperparameter pane")
 
         # 5. At queue pane (empty or bottom), press DOWN -> should wrap to left pane, top row (0)
         state.lora_active_panel = "queue"
@@ -709,7 +710,7 @@ class TestLoraUI(unittest.TestCase):
         state = CommanderState()
         state.active_tab = 1
         state.lora_active_panel = "right"
-        state.lora_right_focus_idx = 14  # Adapter Out field
+        state.lora_right_focus_idx = 15  # Adapter Out field
 
         _handle_mode2_input(self.mock_win, state, 10)  # Enter
 
@@ -726,7 +727,7 @@ class TestLoraUI(unittest.TestCase):
         state = CommanderState()
         state.active_tab = 1
         state.lora_active_panel = "right"
-        state.lora_right_focus_idx = 14  # Adapter Out field
+        state.lora_right_focus_idx = 15  # Adapter Out field
         state.lora_config.adapter_path = "/custom/adapters"
         state.lora_config.is_custom_name = True
 

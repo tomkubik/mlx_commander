@@ -62,12 +62,73 @@ def _get_dir_safetensors_size_gb(dir_path_str: str) -> float:
     return 0.0
 
 
+_cached_val_counts: Dict[str, Tuple[float, int]] = {}
+
+
+def get_validation_record_count(data_path: Optional[str]) -> int:
+    """
+    Return the number of records in valid.jsonl / validation.jsonl inside data_path,
+    cached by file modification time to avoid repeated disk I/O.
+    """
+    if not data_path:
+        return 0
+    try:
+        base_p = Path(data_path).expanduser()
+        if base_p.is_file():
+            base_p = base_p.parent
+        for fname in ("valid.jsonl", "validation.jsonl"):
+            val_f = base_p / fname
+            if val_f.is_file():
+                mtime = val_f.stat().st_mtime
+                cache_key = str(val_f.resolve())
+                if cache_key in _cached_val_counts:
+                    c_mtime, c_cnt = _cached_val_counts[cache_key]
+                    if c_mtime == mtime:
+                        return c_cnt
+                with open(val_f, "rb") as f:
+                    cnt = sum(1 for line in f if line.strip())
+                _cached_val_counts[cache_key] = (mtime, cnt)
+                return cnt
+    except Exception:
+        pass
+    return 0
+
+
+def _resolve_effective_val_batches(
+    config: LoraRunConfig,
+    val_records: Optional[int] = None,
+) -> Tuple[int, int]:
+    """
+    Resolve (val_record_count, effective_val_batches_per_eval) for a run config.
+    When val_batches == -1, evaluates all (val_records // batch_size) batches in valid.jsonl.
+    When val_batches > 0, evaluates min(val_batches, total_val_batches) when val_records is known.
+    """
+    val_cnt = val_records if val_records is not None else get_validation_record_count(getattr(config, "data", None))
+    val_cnt = max(0, int(val_cnt))
+    b_size = max(1, int(getattr(config, "batch_size", 4)))
+    cfg_vb = int(getattr(config, "val_batches", -1))
+
+    if val_cnt > 0:
+        total_val_batches = max(1, val_cnt // b_size)
+        if cfg_vb == -1:
+            eff_batches = total_val_batches
+        elif cfg_vb > 0:
+            eff_batches = min(cfg_vb, total_val_batches)
+        else:
+            eff_batches = 0
+    else:
+        eff_batches = max(0, cfg_vb) if cfg_vb > 0 else 0
+
+    return val_cnt, eff_batches
+
+
 def clear_estimator_cache() -> None:
     """Clear cached hardware info and directory size lookups."""
     get_hardware_memory_bytes.cache_clear()
     get_apple_silicon_chip.cache_clear()
     get_chip_memory_bandwidth_gbps.cache_clear()
     _get_dir_safetensors_size_gb.cache_clear()
+    _cached_val_counts.clear()
 
 
 def calculate_implied_epochs(
@@ -123,10 +184,15 @@ def is_4bit_quantized(model_name: str) -> bool:
     return "4bit" in lower or "q4" in lower or "int4" in lower or "quantized" in lower
 
 
-def estimate_peak_memory(config: LoraRunConfig, total_ram_bytes: Optional[int] = None) -> Dict[str, Any]:
+def estimate_peak_memory(
+    config: LoraRunConfig,
+    total_ram_bytes: Optional[int] = None,
+    val_records: Optional[int] = None,
+) -> Dict[str, Any]:
     """
     Estimate peak Unified Memory (RAM/VRAM) consumption in GB during LoRA training.
-    Accounts for base weights, LoRA optimizer states, gradient checkpointing, and activation buffers.
+    Accounts for base weights, LoRA optimizer states, gradient checkpointing,
+    activation buffers, and validation dataset / evaluation buffer overhead.
     """
     if total_ram_bytes is None:
         total_ram_bytes = get_hardware_memory_bytes()
@@ -182,10 +248,25 @@ def estimate_peak_memory(config: LoraRunConfig, total_ram_bytes: Optional[int] =
     else:
         act_gb = max(2.5, base_act_gb)
 
-    # 4. Runtime & Metal allocator overhead (GB)
+    # 4. Validation split cache & Metal evaluation buffer pool (GB)
+    # mlx-lm loads and tokenizes the validation set into CacheDataset in RAM, and during
+    # evaluate() allocates length-bucketed Metal buffers across effective_val_batches.
+    val_cnt, eff_val_batches = _resolve_effective_val_batches(config, val_records=val_records)
+    if val_cnt > 0:
+        val_cache_gb = (val_cnt * config.max_seq_length * 8) / (1024 ** 3)
+        val_eval_pool_gb = (
+            min(2.0, (eff_val_batches / 50.0) * (tokens_per_batch / 8192.0) * (param_b / 4.0) * 0.35)
+            if eff_val_batches > 0
+            else 0.0
+        )
+        val_mem_gb = val_cache_gb + val_eval_pool_gb
+    else:
+        val_mem_gb = 0.0
+
+    # 5. Runtime & Metal allocator overhead (GB)
     overhead_gb = 0.8
 
-    peak_gb_raw = model_gb + lora_opt_gb + act_gb + overhead_gb
+    peak_gb_raw = model_gb + lora_opt_gb + act_gb + val_mem_gb + overhead_gb
     usage_ratio = peak_gb_raw / total_ram_gb
 
     # Drop decimals and round everything up to the nearest gigabyte
@@ -193,7 +274,7 @@ def estimate_peak_memory(config: LoraRunConfig, total_ram_bytes: Optional[int] =
     total_ram_int = math.ceil(total_ram_gb)
     model_gb_int = math.ceil(model_gb)
     lora_opt_gb_int = math.ceil(lora_opt_gb)
-    act_gb_int = math.ceil(act_gb)
+    act_gb_int = math.ceil(act_gb + val_mem_gb)
 
     if usage_ratio < 0.70:
         safety_tier = "safe"
@@ -222,6 +303,9 @@ def estimate_peak_memory(config: LoraRunConfig, total_ram_bytes: Optional[int] =
         "optimizer_gb": lora_opt_gb_int,
         "act_gb": act_gb_int,
         "activations_gb": act_gb_int,
+        "val_mem_gb": round(val_mem_gb, 3),
+        "val_records": val_cnt,
+        "effective_val_batches": eff_val_batches,
         "overhead_gb": math.ceil(overhead_gb),
         "peak_gb": peak_gb,
         "est_gb": peak_gb,
@@ -237,9 +321,14 @@ def estimate_peak_memory(config: LoraRunConfig, total_ram_bytes: Optional[int] =
     }
 
 
-def estimate_duration(config: LoraRunConfig, chip_name: Optional[str] = None) -> Dict[str, Any]:
+def estimate_duration(
+    config: LoraRunConfig,
+    chip_name: Optional[str] = None,
+    val_records: Optional[int] = None,
+) -> Dict[str, Any]:
     """
-    Estimate training duration and completion ETA based on hardware and iterations.
+    Estimate training duration and completion ETA based on hardware, training iterations,
+    and validation set evaluation passes (accounting for valid.jsonl size, val_batches, and steps_per_eval).
     """
     if chip_name is None:
         chip_name = get_apple_silicon_chip()
@@ -261,7 +350,22 @@ def estimate_duration(config: LoraRunConfig, chip_name: Optional[str] = None) ->
     seq_factor = max(0.5, config.max_seq_length / 2048.0)
 
     sec_per_step = step_base * model_factor * batch_factor * seq_factor
-    total_seconds = int(config.iters * sec_per_step)
+    train_seconds = config.iters * sec_per_step
+
+    # Validation pass compute overhead:
+    # mlx-lm evaluates at step 1 and every steps_per_eval steps.
+    # Each validation batch is a forward-only pass (~0.35x the cost of a forward+backward+update training step).
+    val_cnt, eff_val_batches = _resolve_effective_val_batches(config, val_records=val_records)
+    steps_per_eval = getattr(config, "steps_per_eval", 100)
+    if eff_val_batches > 0 and steps_per_eval and steps_per_eval > 0:
+        num_val_evals = 1 + (config.iters // max(1, steps_per_eval))
+        sec_per_val_batch = sec_per_step * 0.35
+        val_seconds = num_val_evals * eff_val_batches * sec_per_val_batch
+    else:
+        num_val_evals = 0
+        val_seconds = 0.0
+
+    total_seconds = int(round(train_seconds + val_seconds))
 
     # Format human duration
     if total_seconds < 60:
@@ -279,6 +383,11 @@ def estimate_duration(config: LoraRunConfig, chip_name: Optional[str] = None) ->
 
     return {
         "sec_per_step": round(sec_per_step, 2),
+        "train_seconds": int(round(train_seconds)),
+        "val_seconds": round(val_seconds, 1),
+        "val_records": val_cnt,
+        "effective_val_batches": eff_val_batches,
+        "num_val_evals": num_val_evals,
         "total_seconds": total_seconds,
         "seconds": total_seconds,
         "formatted_duration": duration_str,
