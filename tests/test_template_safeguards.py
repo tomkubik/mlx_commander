@@ -199,6 +199,21 @@ class TestChatTemplateSafeguards(unittest.TestCase):
             self.assertFalse(res["healed"])
             self.assertFalse((model_dir / "tokenizer_config.json.bak").exists())
 
+    def test_stdlib_fallback_when_jinja2_unavailable(self):
+        with patch.dict("sys.modules", {"jinja2": None}):
+            self.assertEqual(probe_chat_template(LLAMA3_TEMPLATE)["status"], "ok")
+            self.assertEqual(probe_chat_template(MINISTRAL_2410_BUGGY_TEMPLATE)["status"], "broken")
+            self.assertEqual(probe_chat_template(QWEN3_THINKING_TEMPLATE)["status"], "broken")
+            self.assertEqual(probe_chat_template(GEMMA_RAISING_TEMPLATE)["status"], "raises")
+
+            healed_min, fixes_min = heal_chat_template_string(MINISTRAL_2410_BUGGY_TEMPLATE)
+            self.assertEqual(len(fixes_min), 1)
+            self.assertEqual(probe_chat_template(healed_min)["status"], "ok")
+
+            healed_qwen, fixes_qwen = heal_chat_template_string(QWEN3_THINKING_TEMPLATE, disable_thinking=True)
+            self.assertEqual(len(fixes_qwen), 1)
+            self.assertEqual(probe_chat_template(healed_qwen)["status"], "ok")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,7 +14,7 @@ from .metrics import (
     format_cli_migration_matrix,
     normalize_answer,
 )
-from .runner import load_test_dataset, run_generative_eval
+from .runner import load_test_dataset, run_generative_eval, select_pre_overfit_checkpoint
 from .storage import (
     append_to_leaderboard_csv,
     generate_html_dashboard,
@@ -34,6 +34,7 @@ __all__ = [
     "normalize_answer",
     "load_test_dataset",
     "run_generative_eval",
+    "select_pre_overfit_checkpoint",
     "append_to_leaderboard_csv",
     "save_run_predictions",
     "generate_html_dashboard",

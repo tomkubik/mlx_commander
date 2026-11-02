@@ -98,6 +98,151 @@ def dataset_has_thinking_traces(
     return False
 
 
+class _AttrDict(dict):
+    """Dictionary with attribute-style access for stdlib Jinja fallback evaluation."""
+
+    def __getattr__(self, key: str) -> Any:
+        try:
+            return self[key]
+        except KeyError:
+            return None
+
+    def __setattr__(self, key: str, value: Any) -> None:
+        self[key] = value
+
+
+def _translate_jinja_expr(expr: str) -> str:
+    expr = expr.strip()
+    expr = re.sub(r"\|\s*trim\b", ".strip()", expr)
+    expr = re.sub(r"\|\s*length\b", ".__len__()", expr)
+    expr = re.sub(
+        r"\b([A-Za-z_]\w*)\s+is\s+not\s+defined\b",
+        lambda m: f"({repr(m.group(1))} not in _env)",
+        expr,
+    )
+    expr = re.sub(
+        r"\b([A-Za-z_]\w*)\s+is\s+defined\b",
+        lambda m: f"({repr(m.group(1))} in _env)",
+        expr,
+    )
+    expr = re.sub(r"\bis\s+false\b", "is False", expr)
+    expr = re.sub(r"\bis\s+true\b", "is True", expr)
+    expr = re.sub(r"\bis\s+not\s+none\b", "is not None", expr)
+    expr = re.sub(r"\bis\s+none\b", "is None", expr)
+    expr = re.sub(r"\btrue\b", "True", expr)
+    expr = re.sub(r"\bfalse\b", "False", expr)
+    expr = re.sub(r"\bnone\b", "None", expr)
+    return expr
+
+
+def _render_stdlib_fallback(
+    chat_template: str,
+    messages: List[Dict[str, str]],
+    add_generation_prompt: bool,
+    bos_token: str = "<s>",
+    eos_token: str = "</s>",
+    **extra_kwargs: Any,
+) -> str:
+    """Pure-stdlib fallback evaluator for Jinja2 chat templates when `jinja2` is not installed."""
+    tokens = re.split(
+        r"(\{%-?.*?-?%\}|\{\{-?.*?-?\}\}|\{#-?.*?-?#\})",
+        chat_template,
+        flags=re.DOTALL,
+    )
+    py_lines = ["_out = []"]
+    indent = 0
+    loop_depth = 0
+
+    for i, tok in enumerate(tokens):
+        if not tok or tok.startswith("{#"):
+            continue
+        if tok.startswith("{{"):
+            inner = tok[2:-2].strip()
+            if inner.startswith("-"):
+                inner = inner[1:].strip()
+            if inner.endswith("-"):
+                inner = inner[:-1].strip()
+            py_lines.append("    " * indent + f"_val = ({_translate_jinja_expr(inner)})")
+            py_lines.append("    " * indent + "if _val is not None: _out.append(str(_val))")
+        elif tok.startswith("{%"):
+            inner = tok[2:-2].strip()
+            if inner.startswith("-"):
+                inner = inner[1:].strip()
+            if inner.endswith("-"):
+                inner = inner[:-1].strip()
+            if inner.startswith("if "):
+                py_lines.append("    " * indent + f"if {_translate_jinja_expr(inner[3:])}:")
+                indent += 1
+            elif inner.startswith("elif "):
+                indent = max(0, indent - 1)
+                py_lines.append("    " * indent + f"elif {_translate_jinja_expr(inner[5:])}:")
+                indent += 1
+            elif inner == "else":
+                indent = max(0, indent - 1)
+                py_lines.append("    " * indent + "else:")
+                indent += 1
+            elif inner == "endif":
+                indent = max(0, indent - 1)
+            elif inner.startswith("for "):
+                m = re.match(r"for\s+(\w+)\s+in\s+(.*)", inner, flags=re.DOTALL)
+                if m:
+                    var_name = m.group(1)
+                    seq_expr = _translate_jinja_expr(m.group(2))
+                    loop_depth += 1
+                    lv = f"_seq_{loop_depth}"
+                    li = f"_idx_{loop_depth}"
+                    py_lines.append("    " * indent + f"{lv} = list({seq_expr})")
+                    py_lines.append("    " * indent + f"for {li}, {var_name} in enumerate({lv}):")
+                    indent += 1
+                    py_lines.append(
+                        "    " * indent
+                        + f"loop = _AttrDict(index0={li}, index={li}+1, first=({li}==0), last=({li}==len({lv})-1), length=len({lv}))"
+                    )
+            elif inner == "endfor":
+                indent = max(0, indent - 1)
+            elif inner.startswith("set "):
+                rest = inner[4:].strip()
+                if "=" in rest:
+                    k, v = rest.split("=", 1)
+                    py_lines.append("    " * indent + f"{k.strip()} = {_translate_jinja_expr(v)}")
+        else:
+            next_strip = i + 1 < len(tokens) and (
+                tokens[i + 1].startswith("{%-")
+                or tokens[i + 1].startswith("{{-")
+                or tokens[i + 1].startswith("{#-")
+            )
+            txt = tok
+            if i > 0 and (
+                tokens[i - 1].endswith("-%}")
+                or tokens[i - 1].endswith("-}}")
+                or tokens[i - 1].endswith("-#}")
+            ):
+                txt = txt.lstrip()
+            if next_strip:
+                txt = txt.rstrip()
+            if txt:
+                py_lines.append("    " * indent + f"_out.append({repr(txt)})")
+
+    code = "\n".join(py_lines)
+
+    def _raise_exception(msg: str) -> None:
+        raise ValueError(msg)
+
+    env: Dict[str, Any] = {
+        "messages": [_AttrDict(m) for m in messages],
+        "add_generation_prompt": add_generation_prompt,
+        "bos_token": bos_token,
+        "eos_token": eos_token,
+        "raise_exception": _raise_exception,
+        "namespace": lambda **k: _AttrDict(**k),
+        "_AttrDict": _AttrDict,
+        **extra_kwargs,
+    }
+    env["_env"] = env
+    exec(code, env, env)
+    return "".join(env["_out"])
+
+
 def _render_jinja_template(
     chat_template: str,
     messages: List[Dict[str, str]],
@@ -106,8 +251,22 @@ def _render_jinja_template(
     eos_token: str = "</s>",
     **extra_kwargs: Any,
 ) -> str:
-    """Render a Hugging Face Jinja2 `chat_template` string in a sandboxed environment."""
-    from jinja2 import Environment
+    """Render a Hugging Face Jinja2 `chat_template` string, falling back to stdlib if `jinja2` is absent."""
+    try:
+        from jinja2 import Environment
+        has_jinja = True
+    except ImportError:
+        has_jinja = False
+
+    if not has_jinja:
+        return _render_stdlib_fallback(
+            chat_template,
+            messages=messages,
+            add_generation_prompt=add_generation_prompt,
+            bos_token=bos_token,
+            eos_token=eos_token,
+            **extra_kwargs,
+        )
 
     extensions = []
     try:
@@ -165,11 +324,6 @@ def probe_chat_template(
     render_fn: Optional[Callable[..., str]] = None
 
     if isinstance(template_or_callable, str):
-        try:
-            import jinja2  # noqa: F401
-        except ImportError:
-            return {"status": "unavailable", "reason": "jinja2 not installed"}
-
         def _render_str(msgs: List[Dict[str, str]], add_gen: bool, **kw: Any) -> str:
             return _render_jinja_template(
                 template_or_callable,

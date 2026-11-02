@@ -30,6 +30,7 @@ from mlx_commander.evals.runner import (
     resolve_eval_checkpoints,
     run_generative_eval,
     run_inference_batch,
+    select_pre_overfit_checkpoint,
 )
 from mlx_commander.evals.storage import (
     append_to_leaderboard_csv,
@@ -41,6 +42,7 @@ from mlx_commander.lora.config import (
     EVAL_STRATEGY_FINAL,
     EVAL_STRATEGY_MIN_TRAIN_LOSS,
     EVAL_STRATEGY_MIN_VAL_LOSS,
+    EVAL_STRATEGY_PRE_OVERFIT,
     LoraRunConfig,
 )
 from mlx_commander.lora.multi_config import MultiLoraRunConfig, SWEEP_FIELD_DEFS
@@ -784,6 +786,85 @@ class TestAdapterCheckpointEvaluation(unittest.TestCase):
         from_yaml_cfg = LoraRunConfig.from_yaml(yaml_text)
         self.assertEqual(from_yaml_cfg.eval_adapter_strategy, "best_train_loss")
         self.assertTrue(from_yaml_cfg.run_eval)
+
+    def test_select_pre_overfit_checkpoint_u_shaped_rebound(self):
+        ckpts = [100, 200, 300, 400, 500, 600]
+        val_losses = {
+            100: 1.250,
+            200: 0.620,
+            300: 0.380,  # True minimum before rebound
+            400: 0.430,  # +13% rebound (> 5% tolerance)
+            500: 0.510,
+            600: 0.640,
+        }
+        chosen = select_pre_overfit_checkpoint(ckpts, val_losses)
+        self.assertEqual(chosen, 300)
+
+    def test_select_pre_overfit_checkpoint_flat_bottom_plateau(self):
+        # Val loss drops 0.840 total (1.200 -> 0.360), but 99.4% of that drop
+        # is already achieved by step 300 (0.365). Steps 400-500 are flat plateau
+        # noise where train loss keeps dropping (memorization).
+        ckpts = [100, 200, 300, 400, 500, 600]
+        val_losses = {
+            100: 1.200,
+            200: 0.550,
+            300: 0.365,  # Knee! Within 2% of total drop (threshold = 0.360 + 0.0168 = 0.3768)
+            400: 0.362,
+            500: 0.360,  # Raw argmin, 200 steps deeper into memorization
+            600: 0.420,  # Overfitting rebound
+        }
+        chosen = select_pre_overfit_checkpoint(ckpts, val_losses)
+        self.assertEqual(chosen, 300)
+
+    def test_select_pre_overfit_checkpoint_ignores_post_rebound_dip(self):
+        ckpts = [100, 200, 300, 400, 500]
+        val_losses = {
+            100: 0.900,
+            200: 0.400,  # Pre-rebound minimum
+            300: 0.450,  # +12.5% rebound (> 5% tolerance -> truncates here)
+            400: 0.490,
+            500: 0.395,  # Late noisy dip after overfitting already started
+        }
+        chosen = select_pre_overfit_checkpoint(ckpts, val_losses)
+        self.assertEqual(chosen, 200)
+
+    def test_select_pre_overfit_checkpoint_monotonic_descent(self):
+        ckpts = [100, 200, 300, 400]
+        val_losses = {
+            100: 1.500,
+            200: 1.100,
+            300: 0.800,
+            400: 0.550,
+        }
+        chosen = select_pre_overfit_checkpoint(ckpts, val_losses)
+        self.assertEqual(chosen, 400)
+
+    def test_resolve_eval_checkpoints_pre_overfit_strategy(self):
+        adir = self.base_path / "adapters_pre_overfit"
+        adir.mkdir()
+        for step in (100, 200, 300, 400, 500):
+            (adir / f"{step:07d}_adapters.safetensors").touch()
+        (adir / "adapters.safetensors").touch()
+
+        log_file = self.base_path / "pre_overfit.log"
+        with open(log_file, "w", encoding="utf-8") as f:
+            f.write("Iter 100: Train loss 1.400\nIter 100: Val loss 1.200\n")
+            f.write("Iter 200: Train loss 0.800\nIter 200: Val loss 0.550\n")
+            f.write("Iter 300: Train loss 0.450\nIter 300: Val loss 0.365\n")
+            f.write("Iter 400: Train loss 0.220\nIter 400: Val loss 0.362\n")
+            f.write("Iter 500: Train loss 0.090\nIter 500: Val loss 0.360\n")
+
+        cfg = LoraRunConfig(
+            name="pre_overfit_run",
+            adapter_path=str(adir),
+            iters=500,
+            eval_adapter_strategy=EVAL_STRATEGY_PRE_OVERFIT,
+            log_file=str(log_file),
+        )
+        res = resolve_eval_checkpoints(cfg, log_file=log_file)
+        self.assertEqual(len(res), 1)
+        self.assertIn("pre-overfit knee", res[0][0].lower())
+        self.assertIn("300", res[0][1].name)
 
 
 if __name__ == "__main__":

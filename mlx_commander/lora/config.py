@@ -28,6 +28,7 @@ EVAL_STRATEGY_FINAL = "final"
 EVAL_STRATEGY_MIN_VAL_LOSS = "best_val_loss"
 EVAL_STRATEGY_MIN_TRAIN_LOSS = "best_train_loss"
 EVAL_STRATEGY_ALL = "all"
+EVAL_STRATEGY_PRE_OVERFIT = "pre_overfit"
 EVAL_STRATEGY_DISABLED = "disabled"
 
 EVAL_STRATEGY_CHOICES = [
@@ -35,6 +36,7 @@ EVAL_STRATEGY_CHOICES = [
     (EVAL_STRATEGY_MIN_VAL_LOSS, "Adapter with minimal validation loss"),
     (EVAL_STRATEGY_MIN_TRAIN_LOSS, "Adapter with minimal training loss"),
     (EVAL_STRATEGY_ALL, "Every single adapter"),
+    (EVAL_STRATEGY_PRE_OVERFIT, "Pre-overfit knee (when val loss finishes dropping, before rebound)"),
     (EVAL_STRATEGY_DISABLED, "Disabled (do not run test evals)"),
 ]
 
@@ -43,6 +45,7 @@ EVAL_STRATEGY_DISPLAY_MAP = {
     EVAL_STRATEGY_MIN_VAL_LOSS: "Min val loss",
     EVAL_STRATEGY_MIN_TRAIN_LOSS: "Min train loss",
     EVAL_STRATEGY_ALL: "All adapters",
+    EVAL_STRATEGY_PRE_OVERFIT: "Pre-overfit knee",
 }
 
 

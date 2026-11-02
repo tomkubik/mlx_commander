@@ -28,6 +28,7 @@ from ..lora.config import (
     EVAL_STRATEGY_FINAL,
     EVAL_STRATEGY_MIN_TRAIN_LOSS,
     EVAL_STRATEGY_MIN_VAL_LOSS,
+    EVAL_STRATEGY_PRE_OVERFIT,
     LoraRunConfig,
     sanitize_model_slug,
 )
@@ -577,6 +578,64 @@ def discover_adapter_checkpoints(
     return checkpoints
 
 
+def select_pre_overfit_checkpoint(
+    checkpoints: List[int],
+    val_losses: Dict[int, float],
+    train_losses: Optional[Dict[int, float]] = None,
+    rebound_rel_tol: float = 0.05,
+    knee_drop_tol: float = 0.02,
+    knee_abs_tol: float = 0.005,
+) -> int:
+    """
+    Deterministically select the checkpoint right when validation loss has finished
+    meaningfully dropping and before overfitting begins, combining:
+
+      1. Rebound Guard (Prechelt's Generalization Loss):
+         Walks forward in time tracking the running minimum validation loss.
+         Truncates the search window as soon as validation loss rebounds by > `rebound_rel_tol`
+         (5%) above the running minimum or rises for 2 consecutive checkpoints.
+
+      2. Earliest-Within-Tolerance Knee Rule:
+         Within the pre-overfit window, finds the earliest checkpoint that has captured
+         `(1 - knee_drop_tol)` (98%) of the total validation loss drop (floored by
+         `knee_abs_tol` = 0.005), avoiding late flat-plateau training-set memorization.
+    """
+    steps = sorted(s for s in checkpoints if s in val_losses)
+    if not steps:
+        return max(checkpoints) if checkpoints else 0
+
+    run_min = val_losses[steps[0]]
+    run_min_idx = 0
+    consecutive_rises = 0
+
+    for i, s in enumerate(steps):
+        v = val_losses[s]
+        if v < run_min:
+            run_min = v
+            run_min_idx = i
+            consecutive_rises = 0
+        else:
+            if i > 0 and v > val_losses[steps[i - 1]]:
+                consecutive_rises += 1
+            else:
+                consecutive_rises = 0
+
+            rel_rebound = (v - run_min) / max(run_min, 1e-8)
+            if rel_rebound > rebound_rel_tol or consecutive_rises >= 2:
+                break
+
+    window = steps[: run_min_idx + 1]
+    l_first = val_losses[window[0]]
+    l_best = val_losses[window[-1]]
+    total_drop = max(0.0, l_first - l_best)
+    threshold = l_best + max(knee_abs_tol, knee_drop_tol * total_drop)
+
+    for s in window:
+        if val_losses[s] <= threshold:
+            return s
+    return window[-1]
+
+
 def resolve_eval_checkpoints(
     config: LoraRunConfig,
     strategy: Optional[str] = None,
@@ -586,6 +645,7 @@ def resolve_eval_checkpoints(
     Resolve which adapter checkpoint(s) should be evaluated based on the selected strategy:
       - 'final': Last adapter trained (checkpoint at final step)
       - 'best_val_loss': Adapter with minimal validation loss
+      - 'pre_overfit': Pre-overfit knee (when val loss finishes dropping, before rebound)
       - 'best_train_loss': Adapter with minimal training loss
       - 'all': Every single adapter checkpoint
     Returns:
@@ -627,6 +687,17 @@ def resolve_eval_checkpoints(
             best_step = min(matched_steps, key=lambda s: val_losses[s])
             best_loss = val_losses[best_step]
             return [(f"Adapter with minimal validation loss (step {best_step}, val loss {best_loss:.4f})", checkpoints[best_step])]
+        else:
+            final_step = max(checkpoints.keys())
+            return [("Final trained adapter (fallback: no val loss in log)", checkpoints[final_step])]
+
+    # Strategy 2b: Pre-overfit knee (when validation loss finishes dropping, before rebound)
+    elif strat in (EVAL_STRATEGY_PRE_OVERFIT, "pre_overfit", "pre_overfit_knee", "knee"):
+        matched_steps = [s for s in checkpoints if s in val_losses]
+        if matched_steps:
+            knee_step = select_pre_overfit_checkpoint(matched_steps, val_losses, train_losses=train_losses)
+            knee_loss = val_losses[knee_step]
+            return [(f"Pre-overfit knee adapter (step {knee_step}, val loss {knee_loss:.4f})", checkpoints[knee_step])]
         else:
             final_step = max(checkpoints.keys())
             return [("Final trained adapter (fallback: no val loss in log)", checkpoints[final_step])]
