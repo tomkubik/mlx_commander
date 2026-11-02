@@ -52,6 +52,12 @@ from .vlm_safeguards import (
     should_suggest_vlm_tweak,
     should_suggest_vlm_sweep_tweak,
 )
+from .template_safeguards import (
+    dataset_has_thinking_traces,
+    heal_chat_template_string,
+    heal_model_chat_template,
+    probe_chat_template,
+)
 
 __all__ = [
     "EVAL_STRATEGY_FINAL",
@@ -97,4 +103,8 @@ __all__ = [
     "calculate_vlm_sweep_tweak",
     "should_suggest_vlm_tweak",
     "should_suggest_vlm_sweep_tweak",
+    "dataset_has_thinking_traces",
+    "heal_chat_template_string",
+    "heal_model_chat_template",
+    "probe_chat_template",
 ]

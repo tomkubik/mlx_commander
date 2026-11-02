@@ -121,13 +121,48 @@ def format_prompt_for_model(item: Any, tok_or_processor: Any) -> str:
     apply_fn = getattr(tok_or_processor, "apply_chat_template", None) or getattr(tok, "apply_chat_template", None)
 
     if callable(apply_fn):
-        # 1. First attempt: standard apply_chat_template
+        def _invoke_apply(msgs: List[Dict[str, str]], add_gen: bool = True) -> str:
+            try:
+                return str(
+                    apply_fn(
+                        msgs,
+                        tokenize=False,
+                        add_generation_prompt=add_gen,
+                        enable_thinking=False,
+                    )
+                )
+            except TypeError:
+                return str(apply_fn(msgs, tokenize=False, add_generation_prompt=add_gen))
+
+        sys_contents = [
+            str(m.get("content", "")).strip()
+            for m in messages
+            if isinstance(m, dict) and m.get("role") == "system" and str(m.get("content", "")).strip()
+        ]
+
+        # 1. First attempt: standard apply_chat_template, verified to preserve any system prompt
+        # in both 2-turn inference and 3-turn training formats.
         try:
-            return apply_fn(messages, tokenize=False, add_generation_prompt=True)
+            rendered = _invoke_apply(messages, add_gen=True)
+            sys_kept = True
+            if sys_contents:
+                if not all(sc in rendered for sc in sys_contents):
+                    sys_kept = False
+                else:
+                    try:
+                        train_probe = messages + [{"role": "assistant", "content": "__MLX_AST_PROBE__"}]
+                        rendered_train = _invoke_apply(train_probe, add_gen=False)
+                        if not all(sc in rendered_train for sc in sys_contents):
+                            sys_kept = False
+                    except Exception:
+                        pass
+            if sys_kept:
+                return rendered
         except Exception:
             pass
 
-        # 2. Second attempt: merge system prompt into first user turn for models that reject system role (e.g. Gemma)
+        # 2. Second attempt: merge system prompt into first user turn for models that reject
+        # or silently drop the system role (e.g. Gemma, or unhealed templates).
         merged = []
         sys_text = ""
         for m in messages:
@@ -144,7 +179,7 @@ def format_prompt_for_model(item: Any, tok_or_processor: Any) -> str:
             merged.append({"role": "user", "content": sys_text})
 
         try:
-            return apply_fn(merged, tokenize=False, add_generation_prompt=True)
+            return _invoke_apply(merged, add_gen=True)
         except Exception:
             pass
 
@@ -178,16 +213,22 @@ def extract_generation_text(resp: Any) -> str:
 
 def clean_generation_answer(raw_resp: Any) -> str:
     """
-    Extract clean answer text and strip residual special tokens and turn tags.
+    Extract clean answer text and strip residual special tokens, reasoning blocks, and turn tags.
     """
     ans = extract_generation_text(raw_resp).strip()
 
+    # Strip closed thinking/reasoning blocks (e.g. Qwen3 <think>...</think> or Gemma 4 <|channel>thought...<channel|>)
+    if "<think>" in ans and "</think>" in ans:
+        ans = re.sub(r"<think>.*?</think>", "", ans, flags=re.DOTALL).strip()
+    if "<|channel>thought" in ans and "<channel|>" in ans:
+        ans = re.sub(r"<\|channel>thought.*?<channel\|>", "", ans, flags=re.DOTALL).strip()
+
     # Clean common model/turn tags from generated answer if any leaked
-    for prefix in ["<start_of_turn>model", "assistant:", "model:"]:
+    for prefix in ["<start_of_turn>model", "<|turn>model", "assistant:", "model:"]:
         if ans.lower().startswith(prefix):
             ans = ans[len(prefix):].strip()
 
-    for stop_token in ["<end_of_turn>", "<|eot_id|>", "<|im_end|>", "</s>", "<eos>", "<|endoftext|>"]:
+    for stop_token in ["<end_of_turn>", "<turn|>", "<|eot_id|>", "<|im_end|>", "</s>", "<eos>", "<|endoftext|>"]:
         if ans.endswith(stop_token):
             ans = ans[:-len(stop_token)].strip()
 
@@ -288,6 +329,12 @@ def run_inference_batch(
     processor = None
 
     try:
+        try:
+            from ..lora.template_safeguards import heal_model_chat_template
+            heal_model_chat_template(model_name)
+        except Exception:
+            pass
+
         adapter_arg = adapter_path if (adapter_path and Path(adapter_path).exists()) else None
         if is_vlm:
             try:

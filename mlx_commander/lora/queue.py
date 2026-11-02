@@ -211,6 +211,7 @@ class QueueManager:
                 f"echo '  Config: {cfg_desc}'",
                 f"echo '  Log:    {log_file}'",
                 "echo '---------------------------------------------------'",
+                f'python3 -m mlx_commander.lora.runner --heal-template "{r.model}" --data "{r.data}" 2>&1 | tee "{log_file}"',
                 run_cmd,
                 f'python3 -m mlx_commander.lora.runner --rename-adapters "{r.adapter_path}" --config "{cfg_file}" 2>&1 | tee -a "{log_file}"',
                 f"echo '✔ [{idx}/{len(self.runs)}] Completed: {r.name}'",

@@ -305,6 +305,17 @@ def execute_single_run(
     if engine != "mlx_vlm":
         warn_if_loss_mask_is_off_by_one()
 
+    # Pre-flight Chat Template Safeguard: probe and heal local tokenizer_config.json / chat_template.jinja
+    template_heal_info = None
+    try:
+        from .template_safeguards import heal_model_chat_template
+        template_heal_info = heal_model_chat_template(r.model, data_path=r.data)
+        if template_heal_info.get("healed"):
+            for fix_msg in template_heal_info.get("fixes", []):
+                print(f"  [Chat Template Safeguard] {fix_msg}")
+    except Exception:
+        template_heal_info = None
+
     # Initialize Weights & Biases tracking if enabled and authenticated
     tracker = WandbTracker(project=wandb_project or r.wandb_project, enabled=enable_wandb)
     tracker.start_run(r)
@@ -372,6 +383,10 @@ def execute_single_run(
     with open(log_file, "w", encoding="utf-8") as lf:
         lf.write(f"=== MLX Commander LoRA Run: {r.name} ===\n")
         lf.write(f"Command: {' '.join(cmd)}\n\n")
+        if template_heal_info and template_heal_info.get("healed"):
+            for fix_msg in template_heal_info.get("fixes", []):
+                lf.write(f"  [Chat Template Safeguard] {fix_msg}\n")
+            lf.write("\n")
         lf.flush()
 
         def _stream_proc(proc: subprocess.Popen) -> int:
@@ -549,9 +564,17 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="MLX Commander LoRA runner and adapter utility.")
     parser.add_argument("--rename-adapters", type=str, help="Directory containing saved adapters to rename.")
+    parser.add_argument("--heal-template", type=str, help="Local model directory to probe and auto-heal chat template.")
+    parser.add_argument("--data", type=str, default=None, help="Optional dataset path for template safeguard inspection.")
     parser.add_argument("--config", type=str, help="Path to run YAML config file.")
     parser.add_argument("--iters", type=int, default=None, help="Total training iterations.")
     cli_args = parser.parse_args()
+
+    if cli_args.heal_template:
+        from .template_safeguards import heal_model_chat_template
+        heal_res = heal_model_chat_template(cli_args.heal_template, data_path=cli_args.data)
+        for fix_msg in heal_res.get("fixes", []):
+            print(f"  [Chat Template Safeguard] {fix_msg}")
 
     if cli_args.rename_adapters:
         cfg = None

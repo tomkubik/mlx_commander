@@ -550,8 +550,62 @@ class TestChatTemplateFormatting(unittest.TestCase):
 
     def test_clean_generation_answer_strips_turn_tokens(self):
         self.assertEqual(clean_generation_answer("<start_of_turn>model\nnegative<end_of_turn>"), "negative")
+        self.assertEqual(clean_generation_answer("<|turn>model\nnegative<turn|>"), "negative")
         self.assertEqual(clean_generation_answer("assistant:\npositive<|eot_id|>"), "positive")
         self.assertEqual(clean_generation_answer("neutral</s>"), "neutral")
+
+    def test_clean_generation_answer_strips_thinking_blocks(self):
+        self.assertEqual(
+            clean_generation_answer("<think>\n\n</think>\n\nnegative<|im_end|>"),
+            "negative",
+        )
+        self.assertEqual(
+            clean_generation_answer("<think>\nCould be positive or neutral, but profit fell.\n</think>\n\nnegative"),
+            "negative",
+        )
+        self.assertEqual(
+            clean_generation_answer("<|channel>thought\nReasoning here\n<channel|>positive<turn|>"),
+            "positive",
+        )
+
+    def test_format_prompt_silent_system_drop_merges_into_user(self):
+        class MockSilentDropTokenizer:
+            def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=True):
+                # Accepts system role without raising, but ignores it
+                res = ""
+                for m in messages:
+                    if m["role"] == "user":
+                        res += f"[INST]{m['content']}[/INST]"
+                return res
+
+        sample = {
+            "messages": [
+                {"role": "system", "content": "Reply with one word."},
+                {"role": "user", "content": "Revenue grew."},
+            ]
+        }
+        res = format_prompt_for_model(sample, MockSilentDropTokenizer())
+        self.assertIn("Reply with one word.", res)
+        self.assertIn("Revenue grew.", res)
+
+    def test_format_prompt_passes_enable_thinking_false_when_supported(self):
+        class MockQwen3Tokenizer:
+            def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=True, **kwargs):
+                res = "".join(f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>\n" for m in messages)
+                if add_generation_prompt:
+                    res += "<|im_start|>assistant\n"
+                    if kwargs.get("enable_thinking") is False:
+                        res += "<think>\n\n</think>\n\n"
+                return res
+
+        sample = {
+            "messages": [
+                {"role": "system", "content": "Classifier."},
+                {"role": "user", "content": "Profit fell."},
+            ]
+        }
+        res = format_prompt_for_model(sample, MockQwen3Tokenizer())
+        self.assertTrue(res.endswith("<|im_start|>assistant\n<think>\n\n</think>\n\n"))
 
 
 class TestAdapterCheckpointEvaluation(unittest.TestCase):
